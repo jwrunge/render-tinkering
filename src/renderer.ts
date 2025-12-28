@@ -4,32 +4,33 @@ type Color = [ number, number, number ];
 
 export class Renderer {
     canvas: Canvas;
-    #buffer: Color[][] = [];
+    // Flat RGBA buffer: [r0, g0, b0, a0, r1, g1, b1, a1, ...]
+    #buffer: Uint8ClampedArray;
     #image: ImageData;
 
-    get buffer(): ReadonlyArray<Color[]> {
+    get buffer(): Uint8ClampedArray {
         return this.#buffer;
     }
 
     constructor(canvas: Canvas) {
         this.canvas = canvas;
 
-        this.#buffer = Array.from({ length: canvas.height }, () =>
-            Array.from({ length: canvas.width }, (): Color => [0, 0, 0]),
-        );
-
-        // Prevent replacing whole rows (e.g. buffer[0] = ...), while still
-        // allowing pixel edits (e.g. buffer[0][0] = ...).
-        Object.freeze(this.#buffer);
+        const size = canvas.width * canvas.height * 4;
+        this.#buffer = new Uint8ClampedArray(size);
 
         this.#image = this.canvas.ctx.createImageData(canvas.width, canvas.height);
     }
 
     fill(color: Color) {
-        for (let y = 0; y < this.canvas.height; y++) {
-            for (let x = 0; x < this.canvas.width; x++) {
-                this.setPixel(x, y, color);
-            }
+        const [r, g, b] = color;
+        const buf = this.#buffer;
+        
+        // Write 4 bytes at a time without function calls.
+        for (let i = 0; i < buf.length; i += 4) {
+            buf[i] = r;
+            buf[i + 1] = g;
+            buf[i + 2] = b;
+            buf[i + 3] = 255;
         }
     }
 
@@ -38,31 +39,20 @@ export class Renderer {
             return;
         }
 
-        this.#buffer[y][x] = color;
+        const i = (y * this.canvas.width + x) * 4;
+        this.#buffer[i] = color[0];
+        this.#buffer[i + 1] = color[1];
+        this.#buffer[i + 2] = color[2];
+        this.#buffer[i + 3] = 255;
     }
 
     render() {
-        const bufferWidth = this.canvas.width;
-        const bufferHeight = this.canvas.height;
+        const renderStart = performance.now();
 
-        // If logical resolution ever changes, rebuild the ImageData.
-        if (this.#image.width !== bufferWidth || this.#image.height !== bufferHeight) {
-            this.#image = this.canvas.ctx.createImageData(bufferWidth, bufferHeight);
-        }
-
-        const data = this.#image.data;
-        let i = 0;
-        for (let y = 0; y < bufferHeight; y++) {
-            const row = this.#buffer[y];
-            for (let x = 0; x < bufferWidth; x++) {
-                const [r, g, b] = row[x];
-                data[i++] = r;
-                data[i++] = g;
-                data[i++] = b;
-                data[i++] = 255;
-            }
-        }
+        // Direct copy: no per-pixel operations, just memcpy-like bulk transfer.
+        this.#image.data.set(this.#buffer);
 
         this.canvas.ctx.putImageData(this.#image, 0, 0);
+        console.log(`Render time: ${(performance.now() - renderStart).toFixed(2)} ms`);
     }
 }

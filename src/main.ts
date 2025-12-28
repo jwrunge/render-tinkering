@@ -2,7 +2,7 @@ import { Canvas } from "./canvas";
 import { Renderer } from "./renderer";
 import "./style.css";
 
-const canvas = new Canvas("#app", { width: 600, height: Math.round((600 * 9) / 16) });
+const canvas = new Canvas("#app", { width: 3000, height: 2400 });
 const renderer = new Renderer(canvas);
 
 let px_y = 0;
