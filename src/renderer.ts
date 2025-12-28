@@ -47,12 +47,8 @@ export class Renderer {
     }
 
     render() {
-        const renderStart = performance.now();
-
         // Direct copy: no per-pixel operations, just memcpy-like bulk transfer.
         this.#image.data.set(this.#buffer);
-
         this.canvas.ctx.putImageData(this.#image, 0, 0);
-        console.log(`Render time: ${(performance.now() - renderStart).toFixed(2)} ms`);
     }
 }
