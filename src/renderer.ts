@@ -24,26 +24,30 @@ export class Renderer {
     fill(color: Color) {
         const [r, g, b] = color;
         const buf = this.#buffer;
-        
-        // Write 4 bytes at a time without function calls.
-        for (let i = 0; i < buf.length; i += 4) {
-            buf[i] = r;
-            buf[i + 1] = g;
-            buf[i + 2] = b;
-            buf[i + 3] = 255;
-        }
-    }
 
-    setPixel(x: number, y: number, color: Color) {
-        if (x < 0 || y < 0 || x >= this.canvas.width || y >= this.canvas.height) {
+        // Fast path: if filling with black, just zero the whole buffer
+        if (r === 0 && g === 0 && b === 0) {
+            buf.fill(0);
             return;
         }
 
-        const i = (y * this.canvas.width + x) * 4;
-        this.#buffer[i] = color[0];
-        this.#buffer[i + 1] = color[1];
-        this.#buffer[i + 2] = color[2];
-        this.#buffer[i + 3] = 255;
+        // For non-black: write RGBA pattern once, then copy it repeatedly
+        // This is faster than writing each pixel individually
+        const pixelCount = this.canvas.width * this.canvas.height;
+        
+        // Write first pixel
+        buf[0] = r;
+        buf[1] = g;
+        buf[2] = b;
+        buf[3] = 255;
+
+        // Double the filled region repeatedly (1 pixel -> 2 -> 4 -> 8 -> ...)
+        let filled = 1;
+        while (filled < pixelCount) {
+            const copySize = Math.min(filled, pixelCount - filled) * 4;
+            buf.copyWithin(filled * 4, 0, copySize);
+            filled += copySize / 4;
+        }
     }
 
     render() {
