@@ -63,7 +63,6 @@ export class Renderer {
             }
         }
 
-        // 1:1 blit into the backing store. Visual scaling is handled by CSS.
         this.canvas.ctx.putImageData(this.#image, 0, 0);
     }
 }
