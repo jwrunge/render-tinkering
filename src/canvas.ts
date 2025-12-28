@@ -28,8 +28,10 @@ export class Canvas {
         }
         this.ctx = ctx;
         
-        this.#width = ops?.width ?? this.#width;
-        this.#height = ops?.height ?? this.#height;
+        const toPixelInt = (value: number) => Math.max(1, Math.round(value));
+
+        this.#width = toPixelInt(ops?.width ?? this.#width);
+        this.#height = toPixelInt(ops?.height ?? this.#height);
         this.#aspectRatio = this.#width / this.#height;
         this.#resizerHooks = ops?.resizeHooks ?? [];
 

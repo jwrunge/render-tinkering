@@ -2,7 +2,7 @@ import { Canvas } from "./canvas";
 import { Renderer } from "./renderer";
 import "./style.css";
 
-const canvas = new Canvas("#app", { width: 600, height: 337.5 });
+const canvas = new Canvas("#app", { width: 600, height: Math.round((600 * 9) / 16) });
 const renderer = new Renderer(canvas);
 
 let px_y = 0;
@@ -22,7 +22,7 @@ const movePx = (time: number) => {
 	lastTime = time;
 
 	// Example: time-based motion using elapsed time.
-	px_y = Math.floor(((Math.sin(elapsedMs / 500) + 1) / 2) * (canvas.height));
+	px_y = Math.floor(((Math.sin(elapsedMs / 500) + 1) / 2) * (canvas.height - 1));
 
 	// Optional: clear previous frame so the pixel doesn't leave a trail.
 	renderer.fill([0, 0, 0]);
