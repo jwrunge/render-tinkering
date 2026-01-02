@@ -1,4 +1,3 @@
-import type { Chunk } from "./chunk";
 import { Renderable, type RenderableData } from "./renderable";
 
 type MatrixRow = [number, number, number, number];
@@ -19,7 +18,10 @@ export type SummaryOutput = {
 }
 
 export class Object3D extends Renderable {
+    // Reserved for future transformation support
+    // @ts-expect-error - Reserved for future transformation support
     #worldSpace: TxMatrix = IDENTITY_MATRIX;
+    // @ts-expect-error - Reserved for future transformation support
     #transform: TxMatrix;
     #summary: SummaryOutput = { pixel: [255, 0, 255], maxLod: 20 };
 

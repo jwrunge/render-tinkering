@@ -1,23 +1,47 @@
+import { Chunk } from "./chunk";
+import type { Renderable } from "./renderable";
+
 export class World {
-    objects: unknown[] = [];
+    objects: Renderable[] = [];
     #drawDistance: number;
     #chunkRows = 5;
     #chunkSize = 100;
-    #chunks: unknown[];
-    #currentChunk = 0;
+    #chunks: Chunk[];
 
     constructor(drawDistance: number) {
         this.#drawDistance = drawDistance;
+        this.#chunks = [];
+        this.#initializeChunks();
+    }
+
+    #initializeChunks() {
+        // Initialize chunk grid based on chunk size
+        for (let i = 0; i < this.#chunkRows * this.#chunkRows; i++) {
+            const row = Math.floor(i / this.#chunkRows);
+            const col = i % this.#chunkRows;
+            const position: [number, number, number] = [
+                col * this.#chunkSize,
+                0,
+                row * this.#chunkSize
+            ];
+            this.#chunks.push(new Chunk(position));
+        }
     }
 
     set drawDistance(distance: number) {
         this.#drawDistance = distance;
+    }
 
-        // Determine chunks based on intended draw distance
-        const minChunks = 8;
-        
-        // Determine chunk size and rows from number of chunks
+    get drawDistance(): number {
+        return this.#drawDistance;
+    }
 
-        // Set chunks
+    addObject(obj: Renderable) {
+        this.objects.push(obj);
+        // TODO: Assign to appropriate chunk based on position
+    }
+
+    getChunks(): Chunk[] {
+        return this.#chunks;
     }
 }

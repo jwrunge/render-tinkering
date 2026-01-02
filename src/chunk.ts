@@ -7,10 +7,8 @@
  */
 
 import { Renderable, type RenderableData } from "./renderable";
-import type { World } from "./world";
 
 export class Chunk extends Renderable {
-    #worldRef: World | null = null;
     #voxelSummary: number[] | null = null; // Cached voxel representation
     #pixelSummary: [number, number, number] | null = null; // Cached pixel color
 
@@ -61,5 +59,4 @@ export class Chunk extends Renderable {
         // Could be average color, dominant color, etc.
         return [128, 128, 128]; // Default gray
     }
-}
 }
