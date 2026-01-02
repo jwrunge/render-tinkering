@@ -18,11 +18,9 @@ export type SummaryOutput = {
 }
 
 export class Object3D extends Renderable {
-    // Reserved for future transformation support
-    // @ts-expect-error - Reserved for future transformation support
     #worldSpace: TxMatrix = IDENTITY_MATRIX;
-    // @ts-expect-error - Reserved for future transformation support
     #transform: TxMatrix;
+    #rotation: [number, number, number] = [0, 0, 0]; // X, Y, Z rotation in radians
     #summary: SummaryOutput = { pixel: [255, 0, 255], maxLod: 20 };
 
     constructor(
@@ -43,6 +41,57 @@ export class Object3D extends Renderable {
     setVertices(vertices: Array<[number, number, number]>) {
         this.vertices = vertices;
         this.dirty = true;
+    }
+
+    rotate(x: number, y: number, z: number) {
+        this.#rotation[0] += x;
+        this.#rotation[1] += y;
+        this.#rotation[2] += z;
+        this.dirty = true;
+    }
+
+    setRotation(x: number, y: number, z: number) {
+        this.#rotation = [x, y, z];
+        this.dirty = true;
+    }
+
+    getRotation(): [number, number, number] {
+        return [...this.#rotation];
+    }
+
+    // Apply rotation transformations to a vertex
+    #rotateVertex(vertex: [number, number, number]): [number, number, number] {
+        const [x, y, z] = vertex;
+        const [rx, ry, rz] = this.#rotation;
+        
+        // Rotate around X axis
+        const px = x;
+        const py = y * Math.cos(rx) - z * Math.sin(rx);
+        const pz = y * Math.sin(rx) + z * Math.cos(rx);
+        
+        // Rotate around Y axis
+        const px2 = px * Math.cos(ry) + pz * Math.sin(ry);
+        const py2 = py;
+        const pz2 = -px * Math.sin(ry) + pz * Math.cos(ry);
+        
+        // Rotate around Z axis
+        const px3 = px2 * Math.cos(rz) - py2 * Math.sin(rz);
+        const py3 = px2 * Math.sin(rz) + py2 * Math.cos(rz);
+        const pz3 = pz2;
+        
+        return [px3, py3, pz3];
+    }
+
+    // Get transformed vertices (with rotation and position applied)
+    getTransformedVertices(): Array<[number, number, number]> {
+        return this.vertices.map(vertex => {
+            const rotated = this.#rotateVertex(vertex);
+            return [
+                rotated[0] + this.position[0],
+                rotated[1] + this.position[1],
+                rotated[2] + this.position[2]
+            ];
+        });
     }
 
     setRep(value: Partial<SummaryOutput>) {
