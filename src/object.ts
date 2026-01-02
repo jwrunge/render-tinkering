@@ -1,6 +1,16 @@
 import type { Chunk } from "./chunk";
 import { Renderable, type RenderableData } from "./renderable";
 
+type MatrixRow = [number, number, number, number];
+type TxMatrix = [MatrixRow, MatrixRow, MatrixRow, MatrixRow];
+
+const IDENTITY_MATRIX: TxMatrix = [
+    [1, 0, 0, 0],
+    [0, 1, 0, 0],
+    [0, 0, 1, 0],
+    [0, 0, 0, 1],
+];
+
 export type SummaryOutput = {
     pixel: [number, number, number],
     maxLod: number,
@@ -9,23 +19,23 @@ export type SummaryOutput = {
 }
 
 export class Object3D extends Renderable {
-    #transform: [[number, number, number], [number, number, number], [number, number, number]];
-    #chunkRef: Chunk | null = null;
+    #worldSpace: TxMatrix = IDENTITY_MATRIX;
+    #transform: TxMatrix;
     #summary: SummaryOutput = { pixel: [255, 0, 255], maxLod: 20 };
 
     constructor(
-        chunkRef: Chunk | null,
+        worldSpace: TxMatrix = IDENTITY_MATRIX,
         ops?: {
             position?: [number, number, number],
-            transform?: [[number, number, number], [number, number, number], [number, number, number]],
+            transform?: TxMatrix,
             vertices?: Array<[number, number, number]>,
             renderAt?: number
         }
     ) {
         super(ops?.position);
-        this.#transform = ops?.transform ?? [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+        this.#worldSpace = worldSpace;
+        this.#transform = ops?.transform ?? IDENTITY_MATRIX;
         this.vertices = ops?.vertices ?? [];
-        this.#chunkRef = chunkRef;
     }
 
     setVertices(vertices: Array<[number, number, number]>) {
