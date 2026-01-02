@@ -22,6 +22,7 @@ export class Object3D extends Renderable {
     #transform: TxMatrix;
     #rotation: [number, number, number] = [0, 0, 0]; // X, Y, Z rotation in radians
     #summary: SummaryOutput = { pixel: [255, 0, 255], maxLod: 20 };
+    color: [number, number, number, number] = [0, 255, 100, 255]; // RGBA color
 
     constructor(
         worldSpace: TxMatrix = IDENTITY_MATRIX,
@@ -29,13 +30,17 @@ export class Object3D extends Renderable {
             position?: [number, number, number],
             transform?: TxMatrix,
             vertices?: Array<[number, number, number]>,
-            renderAt?: number
+            renderAt?: number,
+            color?: [number, number, number, number]
         }
     ) {
         super(ops?.position);
         this.#worldSpace = worldSpace;
         this.#transform = ops?.transform ?? IDENTITY_MATRIX;
         this.vertices = ops?.vertices ?? [];
+        if (ops?.color) {
+            this.color = ops.color;
+        }
     }
 
     setVertices(vertices: Array<[number, number, number]>) {
