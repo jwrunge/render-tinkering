@@ -8,12 +8,15 @@ export class World {
 	#chunkRows = 5;
 	#chunkSize = 100;
 	#chunks: Chunk[];
+	#largeObjects: Renderable[] = []; // Objects that manage their own chunking
 	#renderer: Renderer | null = null;
 	#cameraPosition: [number, number, number] = [0, 0, 0];
+	#devMode = false;
 
-	constructor(drawDistance: number) {
+	constructor(drawDistance: number, options?: { devMode?: boolean }) {
 		this.#drawDistance = drawDistance;
 		this.#chunks = [];
+		this.#devMode = options?.devMode ?? false;
 		this.#initializeChunks();
 	}
 
@@ -47,7 +50,48 @@ export class World {
 		return this.#drawDistance;
 	}
 
+	// Calculate bounding box size for dev-mode checks
+	#calculateBoundingBoxSize(obj: Renderable): number {
+		if (!(obj instanceof Object3D)) return 0;
+		
+		const vertices = obj.getTransformedVertices();
+		if (vertices.length === 0) return 0;
+		
+		let minX = Number.POSITIVE_INFINITY;
+		let maxX = Number.NEGATIVE_INFINITY;
+		let minY = Number.POSITIVE_INFINITY;
+		let maxY = Number.NEGATIVE_INFINITY;
+		let minZ = Number.POSITIVE_INFINITY;
+		let maxZ = Number.NEGATIVE_INFINITY;
+		
+		for (const [x, y, z] of vertices) {
+			minX = Math.min(minX, x);
+			maxX = Math.max(maxX, x);
+			minY = Math.min(minY, y);
+			maxY = Math.max(maxY, y);
+			minZ = Math.min(minZ, z);
+			maxZ = Math.max(maxZ, z);
+		}
+		
+		const sizeX = maxX - minX;
+		const sizeY = maxY - minY;
+		const sizeZ = maxZ - minZ;
+		
+		return Math.max(sizeX, sizeY, sizeZ);
+	}
+
 	addObject(obj: Renderable) {
+		// Dev-mode check: warn if object is too large for a chunk
+		if (this.#devMode) {
+			const size = this.#calculateBoundingBoxSize(obj);
+			if (size > this.#chunkSize * 0.5) {
+				console.warn(
+					`[World Dev Warning] Object with size ${size.toFixed(2)} is larger than half the chunk size (${this.#chunkSize * 0.5}). ` +
+					`Consider using world.addLargeObject() instead for better performance.`
+				);
+			}
+		}
+		
 		// Find the appropriate chunk based on object position
 		const objPos = obj.getPosition();
 		const chunkX = Math.floor(objPos[0] / this.#chunkSize);
@@ -61,6 +105,11 @@ export class World {
 		if (chunkIndex >= 0 && chunkIndex < this.#chunks.length) {
 			this.#chunks[chunkIndex].add(obj, true);
 		}
+	}
+
+	// Add large objects that will manage their own chunking/LOD
+	addLargeObject(obj: Renderable) {
+		this.#largeObjects.push(obj);
 	}
 
 	getChunks(): Chunk[] {
@@ -100,6 +149,14 @@ export class World {
 			const representation = chunk.getRepresentation(lod);
 			
 			this.#renderRepresentation(representation);
+		}
+
+		// Render large objects (they manage their own LOD/chunking)
+		for (const obj of this.#largeObjects) {
+			if (obj instanceof Object3D) {
+				this.#renderObject3D(obj);
+			}
+			// Future: large objects could implement getRepresentation(lod) like chunks
 		}
 
 		// Commit to canvas
