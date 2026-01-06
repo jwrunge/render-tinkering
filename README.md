@@ -1,27 +1,21 @@
-# render (C + SDL3.4)
+# render (Zig + SDL3.4)
 
-## Build
+## Prereqs (macOS)
 
-From the repo root:
+- Zig: you already have `0.15.0-dev.*`
+- SDL3: `brew install sdl3`
 
-```bash
-cmake -S . -B build
-cmake --build build
-```
-
-Run:
+## Build / Run
 
 ```bash
-./build/render
+zig build
+zig build run
 ```
 
-## Build using a system SDL3 instead
+## If SDL3 isn’t found
 
-If you installed SDL3 via a package manager and it provides a CMake config package, try:
+If your SDL3 lives somewhere non-standard, pass an explicit prefix:
 
 ```bash
-cmake -S . -B build -DUSE_SYSTEM_SDL3=ON
-cmake --build build
+zig build -Dsdl3_prefix=$(brew --prefix) run
 ```
-
-If CMake can’t find it, you may need to provide `CMAKE_PREFIX_PATH`.

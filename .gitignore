@@ -1,5 +1,7 @@
 # CMake
 /build/
+/.zig-cache/
+/zig-out/
 /CMakeFiles/
 /CMakeCache.txt
 /cmake_install.cmake
@@ -7,3 +9,4 @@
 
 # macOS
 .DS_Store
+ß
