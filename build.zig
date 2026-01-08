@@ -68,6 +68,9 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const use_software_renderer = b.option(bool, "use_software_renderer", "Force SDL software renderer backend (CPU) instead of GPU") orelse false;
+    const use_simd_fill = b.option(bool, "use_simd_fill", "Use SIMD/vectorized pixel fill (otherwise use scalar fill)") orelse false;
+
     const exe = b.addExecutable(.{
         .name = "render",
         .root_module = b.createModule(.{
@@ -76,6 +79,11 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+
+    const options = b.addOptions();
+    options.addOption(bool, "use_software_renderer", use_software_renderer);
+    options.addOption(bool, "use_simd_fill", use_simd_fill);
+    exe.root_module.addOptions("build_options", options);
 
     exe.linkLibC();
 
