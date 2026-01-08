@@ -69,7 +69,7 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const use_software_renderer = b.option(bool, "use_software_renderer", "Force SDL software renderer backend (CPU) instead of GPU") orelse false;
-    const use_simd_fill = b.option(bool, "use_simd_fill", "Use SIMD/vectorized pixel fill (otherwise use scalar fill)") orelse false;
+    const use_simd_fill = b.option(bool, "use_simd_fill", "Use SIMD/vectorized pixel fill (default: true)") orelse true;
 
     const exe = b.addExecutable(.{
         .name = "render",
