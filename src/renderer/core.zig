@@ -98,7 +98,6 @@ pub const Renderer = struct {
             .w = w,
             .h = h,
             .rng_state4 = .{ a, b, c, d },
-            // Keep scalar RNG seed identical to the pre-SIMD version.
             .rng_tail = seed,
         };
     }
@@ -122,36 +121,59 @@ pub const Renderer = struct {
         const w_usize: usize = @intCast(self.w);
         const h_usize: usize = @intCast(self.h);
 
-        var rng4 = self.rng_state4;
-        var rng_tail = self.rng_tail;
-        const alpha4: @Vector(4, u32) = @splat(0xFF00_0000);
-        const rgb_mask4: @Vector(4, u32) = @splat(0x00FF_FFFF);
+        const RowTask = struct {
+            base: [*]u8,
+            pitch: usize,
+            w: usize,
+            row_start: usize,
+            row_end: usize,
+            seed: u32,
 
-        // Fill full texture. Format is ARGB8888, alpha always 0xFF.
-        var y: usize = 0;
-        while (y < h_usize) : (y += 1) {
-            const row_ptr: [*]u8 = base + y * pitch_usize;
-            const row_u32: [*]u32 = @ptrCast(@alignCast(row_ptr));
+            fn run(task: @This()) void {
+                const alpha4: @Vector(4, u32) = @splat(0xFF00_0000);
+                const rgb_mask4: @Vector(4, u32) = @splat(0x00FF_FFFF);
 
-            var x: usize = 0;
+                var rng4: @Vector(4, u32) = .{ task.seed, task.seed +% 1, task.seed +% 2, task.seed +% 3 };
+                var rng_tail = task.seed;
 
-            if (build_options.use_simd_fill) {
-                while (x + 4 <= w_usize) : (x += 4) {
-                    const r4 = xorshift32x4(&rng4);
-                    const p4: @Vector(4, u32) = alpha4 | (r4 & rgb_mask4);
-                    const dst: *align(1) @Vector(4, u32) = @ptrCast(row_u32 + x);
-                    dst.* = p4;
+                var y = task.row_start;
+                while (y < task.row_end) : (y += 1) {
+                    const row_ptr: [*]u8 = task.base + y * task.pitch;
+                    const row_u32: [*]u32 = @ptrCast(@alignCast(row_ptr));
+                    var x: usize = 0;
+
+                    if (build_options.use_simd_fill) {
+                        while (x + 4 <= task.w) : (x += 4) {
+                            const r4 = xorshift32x4(&rng4);
+                            const p4: @Vector(4, u32) = alpha4 | (r4 & rgb_mask4);
+                            const dst: *align(1) @Vector(4, u32) = @ptrCast(row_u32 + x);
+                            dst.* = p4;
+                        }
+                    }
+
+                    while (x < task.w) : (x += 1) {
+                        const r = xorshift32(&rng_tail);
+                        row_u32[x] = 0xFF000000 | (r & 0x00FFFFFF);
+                    }
                 }
             }
+        };
 
-            while (x < w_usize) : (x += 1) {
-                const r = xorshift32(&rng_tail);
-                row_u32[x] = 0xFF000000 | (r & 0x00FFFFFF);
-            }
-        }
+        // Generate independent random seed for this frame to avoid temporal correlation
+        const frame_time: i128 = std.time.nanoTimestamp();
+        var frame_seed: u32 = @truncate(@as(u128, @bitCast(frame_time)));
+        if (frame_seed == 0) frame_seed = 0xDEADBEEF;
+        var local_rng = frame_seed;
 
-        self.rng_state4 = rng4;
-        self.rng_tail = rng_tail;
+        const task = RowTask{
+            .base = base,
+            .pitch = pitch_usize,
+            .w = w_usize,
+            .row_start = 0,
+            .row_end = h_usize,
+            .seed = xorshift32(&local_rng),
+        };
+        task.run();
 
         // Include unlock cost in lock+fill timing (some backends upload on unlock).
         sdl.SDL_UnlockTexture(self.texture);
