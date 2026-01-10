@@ -71,7 +71,6 @@ pub fn build(b: *std.Build) void {
     const use_software_renderer = b.option(bool, "use_software_renderer", "Force SDL software renderer backend (CPU) instead of GPU") orelse false;
     const use_simd_fill = b.option(bool, "use_simd_fill", "Use SIMD/vectorized pixel fill (default: true)") orelse true;
     const enable_sdl_gpu = b.option(bool, "enable_sdl_gpu", "Enable SDL3 GPU API backend (SDL_gpu.h) (default: true)") orelse true;
-    const build_metal_shaders = b.option(bool, "build_metal_shaders", "On macOS, build Metal shaders into a .metallib for the SDL GPU backend (default: true)") orelse true;
 
     const exe = b.addExecutable(.{
         .name = "render",
@@ -221,42 +220,6 @@ pub fn build(b: *std.Build) void {
 
     if (sdl_ready_step) |s| {
         exe.step.dependOn(s);
-    }
-
-    // Build a tiny demo Metal shader library for the SDL GPU backend.
-    // This is only needed on macOS when the GPU device driver is Metal.
-    if (target.result.os.tag == .macos and enable_sdl_gpu and build_metal_shaders) {
-        std.fs.cwd().makePath("build/shaders") catch {};
-
-        const metal_src = "shaders/pixel.metal";
-        const air_out = "build/shaders/pixel.air";
-        const metallib_out = "build/shaders/pixel.metallib";
-
-        const compile_metal = b.addSystemCommand(&.{
-            "xcrun",
-            "-sdk",
-            "macosx",
-            "metal",
-            "-c",
-            metal_src,
-            "-o",
-            air_out,
-        });
-
-        const link_metallib = b.addSystemCommand(&.{
-            "xcrun",
-            "-sdk",
-            "macosx",
-            "metallib",
-            air_out,
-            "-o",
-            metallib_out,
-        });
-        link_metallib.step.dependOn(&compile_metal.step);
-
-        const install_metallib = b.addInstallBinFile(b.path(metallib_out), "shaders/pixel.metallib");
-        install_metallib.step.dependOn(&link_metallib.step);
-        b.getInstallStep().dependOn(&install_metallib.step);
     }
 
     b.installArtifact(exe);
