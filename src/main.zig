@@ -82,10 +82,17 @@ pub fn main() !void {
             const avg_render_ms: f64 = (@as(f64, @floatFromInt(sum_render_ns)) / denom) / 1_000_000.0;
             const avg_present_ms: f64 = (@as(f64, @floatFromInt(sum_present_ns)) / denom) / 1_000_000.0;
 
-            std.debug.print(
-                "FPS: {d:.1} | lock+fill: {d:.3}ms | render: {d:.3}ms | present: {d:.3}ms\n",
-                .{ fps, avg_lock_ms, avg_render_ms, avg_present_ms },
-            );
+            if (renderer.getBackend() == .gpu) {
+                std.debug.print(
+                    "FPS: {d:.1} | wait+acquire: {d:.3}ms | encode: {d:.3}ms | submit: {d:.3}ms\n",
+                    .{ fps, avg_lock_ms, avg_render_ms, avg_present_ms },
+                );
+            } else {
+                std.debug.print(
+                    "FPS: {d:.1} | lock+fill: {d:.3}ms | render: {d:.3}ms | present: {d:.3}ms\n",
+                    .{ fps, avg_lock_ms, avg_render_ms, avg_present_ms },
+                );
+            }
             frame_count = 0;
             last_fps_time = now;
 

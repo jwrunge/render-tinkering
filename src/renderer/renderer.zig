@@ -44,4 +44,8 @@ pub const Renderer = struct {
             .gpu => try self.gpu.render(),
         };
     }
+
+    pub fn getBackend(self: *Renderer) Backend {
+        return self.backend;
+    }
 };
