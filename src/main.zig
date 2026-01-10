@@ -34,7 +34,8 @@ pub fn main() !void {
 
     std.debug.print("Window size: {d}x{d} | Pixel size: {d}x{d}\n", .{ win_w, win_h, pixel_w, pixel_h });
 
-    var renderer = try renderer_core.Renderer.init(window, win_w, win_h);
+    var renderer: renderer_core.Renderer = undefined;
+    try renderer.init(window, win_w, win_h);
     defer renderer.deinit();
 
     var frame_count: u64 = 0;

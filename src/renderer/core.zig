@@ -9,6 +9,9 @@ pub const Renderer = struct {
     h: i32,
     rng_state4: @Vector(4, u32),
     rng_tail: u32,
+    pool: std.Thread.Pool,
+    wg: std.Thread.WaitGroup,
+    worker_threads: usize,
 
     pub const Timings = struct {
         lock_fill_unlock_ns: u64,
@@ -34,7 +37,7 @@ pub const Renderer = struct {
         return x;
     }
 
-    pub fn init(window: *sdl.SDL_Window, w: i32, h: i32) !Renderer {
+    pub fn init(self: *Renderer, window: *sdl.SDL_Window, w: i32, h: i32) !void {
         const driver = if (build_options.use_software_renderer) sdl.SDL_SOFTWARE_RENDERER else null;
         const sdl_renderer = sdl.SDL_CreateRenderer(window, driver) orelse {
             std.debug.print("SDL_CreateRenderer failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
@@ -92,17 +95,36 @@ pub const Renderer = struct {
         if (c == 0) c = 0xAD90_777D;
         if (d == 0) d = 0x7E95_761E;
 
-        return .{
+        // Set up thread pool for the renderer
+        // The pool allocates a small closure per job; avoid page_allocator here
+        // (it mmap/munmap's per allocation) to prevent VM/map pressure.
+        const allocator = std.heap.smp_allocator;
+        const total_cores = try std.Thread.getCpuCount();
+        const worker_threads = if (total_cores > 1) total_cores - 1 else 1;
+
+        // IMPORTANT: initialize in-place so `self` has a stable address.
+        // std.Thread.Pool worker threads capture a pointer to the pool.
+        self.* = .{
             .sdl_renderer = sdl_renderer,
             .texture = texture,
             .w = w,
             .h = h,
             .rng_state4 = .{ a, b, c, d },
             .rng_tail = seed,
+            .pool = undefined,
+            .wg = .{},
+            .worker_threads = worker_threads,
         };
+
+        try self.pool.init(.{
+            .allocator = allocator,
+            .n_jobs = @intCast(worker_threads),
+        });
+        return;
     }
 
     pub fn deinit(self: *Renderer) void {
+        self.pool.deinit();
         sdl.SDL_DestroyTexture(self.texture);
         sdl.SDL_DestroyRenderer(self.sdl_renderer);
     }
@@ -165,15 +187,37 @@ pub const Renderer = struct {
         if (frame_seed == 0) frame_seed = 0xDEADBEEF;
         var local_rng = frame_seed;
 
-        const task = RowTask{
-            .base = base,
-            .pitch = pitch_usize,
-            .w = w_usize,
-            .row_start = 0,
-            .row_end = h_usize,
-            .seed = xorshift32(&local_rng),
-        };
-        task.run();
+        // Split work into row stripes and dispatch to the thread pool.
+        // Each task writes to a disjoint row range, so it can safely run in parallel.
+        const stripes_target: usize = if (self.worker_threads > 1) self.worker_threads * 4 else 1;
+        const stripes: usize = @max(1, @min(stripes_target, h_usize));
+        const rows_per_stripe: usize = (h_usize + stripes - 1) / stripes;
+
+        var used_pool = false;
+        var row_start: usize = 0;
+        while (row_start < h_usize) : (row_start += rows_per_stripe) {
+            const row_end = @min(h_usize, row_start + rows_per_stripe);
+            const task = RowTask{
+                .base = base,
+                .pitch = pitch_usize,
+                .w = w_usize,
+                .row_start = row_start,
+                .row_end = row_end,
+                .seed = xorshift32(&local_rng),
+            };
+
+            if (stripes == 1) {
+                task.run();
+            } else {
+                used_pool = true;
+                self.pool.spawnWg(&self.wg, RowTask.run, .{task});
+            }
+        }
+
+        if (used_pool) {
+            self.pool.waitAndWork(&self.wg);
+            self.wg.reset();
+        }
 
         // Include unlock cost in lock+fill timing (some backends upload on unlock).
         sdl.SDL_UnlockTexture(self.texture);
