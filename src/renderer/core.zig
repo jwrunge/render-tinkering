@@ -2,7 +2,7 @@ const std = @import("std");
 const sdl = @import("../util/sdl.zig").c;
 const build_options = @import("build_options");
 
-pub const Renderer = struct {
+pub const CpuRenderer = struct {
     sdl_renderer: *sdl.SDL_Renderer,
     texture: *sdl.SDL_Texture,
     w: i32,
@@ -37,7 +37,7 @@ pub const Renderer = struct {
         return x;
     }
 
-    pub fn init(self: *Renderer, window: *sdl.SDL_Window, w: i32, h: i32) !void {
+    pub fn init(self: *CpuRenderer, window: *sdl.SDL_Window, w: i32, h: i32) !void {
         const driver = if (build_options.use_software_renderer) sdl.SDL_SOFTWARE_RENDERER else null;
         const sdl_renderer = sdl.SDL_CreateRenderer(window, driver) orelse {
             std.debug.print("SDL_CreateRenderer failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
@@ -123,13 +123,13 @@ pub const Renderer = struct {
         return;
     }
 
-    pub fn deinit(self: *Renderer) void {
+    pub fn deinit(self: *CpuRenderer) void {
         self.pool.deinit();
         sdl.SDL_DestroyTexture(self.texture);
         sdl.SDL_DestroyRenderer(self.sdl_renderer);
     }
 
-    pub fn render(self: *Renderer) !Timings {
+    pub fn render(self: *CpuRenderer) !Timings {
         const t0: i128 = std.time.nanoTimestamp();
         var locked_pixels: ?*anyopaque = null;
         var pitch: c_int = 0;

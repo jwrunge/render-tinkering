@@ -1,9 +1,16 @@
 const std = @import("std");
 const input = @import("util/input.zig");
 const sdl = @import("util/sdl.zig").c;
-const renderer_core = @import("renderer/core.zig");
+const renderer_mod = @import("renderer/renderer.zig");
 
 pub fn main() !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
+
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+
     if (!sdl.SDL_Init(sdl.SDL_INIT_VIDEO)) {
         std.debug.print("SDL_Init failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
         return error.SDLInitFailed;
@@ -34,8 +41,14 @@ pub fn main() !void {
 
     std.debug.print("Window size: {d}x{d} | Pixel size: {d}x{d}\n", .{ win_w, win_h, pixel_w, pixel_h });
 
-    var renderer: renderer_core.Renderer = undefined;
-    try renderer.init(window, win_w, win_h);
+    var requested_backend: renderer_mod.Backend = .cpu;
+    for (args[1..]) |arg| {
+        if (std.mem.eql(u8, arg, "--gpu")) requested_backend = .gpu;
+        if (std.mem.eql(u8, arg, "--cpu")) requested_backend = .cpu;
+    }
+
+    var renderer: renderer_mod.Renderer = undefined;
+    try renderer.init(window, win_w, win_h, requested_backend);
     defer renderer.deinit();
 
     var frame_count: u64 = 0;

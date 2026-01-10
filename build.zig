@@ -70,6 +70,7 @@ pub fn build(b: *std.Build) void {
 
     const use_software_renderer = b.option(bool, "use_software_renderer", "Force SDL software renderer backend (CPU) instead of GPU") orelse false;
     const use_simd_fill = b.option(bool, "use_simd_fill", "Use SIMD/vectorized pixel fill (default: true)") orelse true;
+    const enable_sdl_gpu = b.option(bool, "enable_sdl_gpu", "Enable SDL3 GPU API backend (SDL_gpu.h) (default: true)") orelse true;
 
     const exe = b.addExecutable(.{
         .name = "render",
@@ -83,6 +84,7 @@ pub fn build(b: *std.Build) void {
     const options = b.addOptions();
     options.addOption(bool, "use_software_renderer", use_software_renderer);
     options.addOption(bool, "use_simd_fill", use_simd_fill);
+    options.addOption(bool, "enable_sdl_gpu", enable_sdl_gpu);
     exe.root_module.addOptions("build_options", options);
 
     exe.linkLibC();
