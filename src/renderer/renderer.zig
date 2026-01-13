@@ -1,5 +1,6 @@
 const std = @import("std");
 const sdl = @import("../util/sdl.zig").c;
+const Window = @import("../util/window.zig").Window;
 
 const cpu_mod = @import("core.zig");
 const gpu_mod = @import("gpu.zig");
@@ -16,7 +17,7 @@ pub const Renderer = struct {
 
     pub const Timings = cpu_mod.CpuRenderer.Timings;
 
-    pub fn init(self: *Renderer, window: *sdl.SDL_Window, w: i32, h: i32, requested: Backend) !void {
+    pub fn init(self: *Renderer, window: *Window, requested: Backend) !void {
         // Default to CPU unless GPU is explicitly requested.
         if (requested == .gpu) {
             if (gpu_mod.GpuRenderer.init(&self.gpu, window)) |_| {
@@ -27,7 +28,7 @@ pub const Renderer = struct {
             }
         }
 
-        try self.cpu.init(window, w, h);
+        try self.cpu.init(window.ref, window.w, window.h);
         self.backend = .cpu;
     }
 

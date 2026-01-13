@@ -7,35 +7,40 @@ const Window = @import("util/window.zig").Window;
 
 pub fn main() !void {
     // Init video & window, Settings, Inputs
-    const window = try Window.init();
+    var window = try Window.init();
     defer window.deinit();
     const settings = try Settings.init();
     var input_map = try input.InputMap.init();
 
+    // Set up renderer
     var renderer: renderer_mod.Renderer = undefined;
-    try renderer.init(window.ref, window.w, window.h, settings.backend);
+    try renderer.init(&window, settings.backend);
     defer renderer.deinit();
 
+    // Frame logging
     var frame_count: u64 = 0;
     var last_fps_time: i128 = std.time.nanoTimestamp();
-
     var sum_lock_fill_unlock_ns: u128 = 0;
     var sum_render_ns: u128 = 0;
     var sum_present_ns: u128 = 0;
 
+    // MAIN LOOP
     var running = true;
     while (running) {
+        // Handle input events
         var e: sdl.SDL_Event = undefined;
         while (sdl.SDL_PollEvent(&e)) {
             input_map.handleEvent(&e, &running);
         }
 
+        // Render frame and update timings
         const timings = try renderer.render();
         sum_lock_fill_unlock_ns += timings.lock_fill_unlock_ns;
         sum_render_ns += timings.render_ns;
         sum_present_ns += timings.present_ns;
-
         frame_count += 1;
+
+        // Update FPS counters
         const now: i128 = std.time.nanoTimestamp();
         const elapsed_ns: i128 = now - last_fps_time;
         if (elapsed_ns >= 1_000_000_000) {
