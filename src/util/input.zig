@@ -1,6 +1,6 @@
 const std = @import("std");
 const sdl = @import("sdl.zig").c;
-const io = @import("io.zig");
+const io = @import("file-io.zig");
 
 pub const app_name: []const u8 = "render";
 pub const input_map_filename: []const u8 = "keymap.cfg";
@@ -52,14 +52,14 @@ pub const InputMap = struct {
         map.resetToDefaults();
 
         // Map bindings from file if it exists
-        try io.readFileLinesWith(InputMap, input_map_filename, &map, handleReadConfigLine);
+        try io.readLines(InputMap, input_map_filename, &map, handleReadConfigLine);
 
         return map;
     }
 
     /// Saves current bindings to `path`, overwriting the file.
     pub fn saveToFile(self: *const InputMap) !void {
-        try io.writeFileWith(input_map_filename, .{ .truncate = true }, self, handleWriteConfig);
+        try io.writeWith(input_map_filename, .{ .truncate = true }, self, handleWriteConfig);
     }
 
     /// Get key for action

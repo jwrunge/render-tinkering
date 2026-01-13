@@ -9,7 +9,7 @@ pub fn getDir(path: []const u8) !std.fs.Dir {
 }
 
 /// Opens the file at `path` for reading.
-pub fn openFile(path: []const u8) !std.fs.File {
+pub fn open(path: []const u8) !std.fs.File {
     var dir = try getDir(path);
     defer dir.close();
 
@@ -18,8 +18,8 @@ pub fn openFile(path: []const u8) !std.fs.File {
 }
 
 /// Reads the entire file into an owned buffer allocated from `allocator`.
-pub fn readFileBytes(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    var file = try openFile(path);
+pub fn readBytes(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
+    var file = try open(path);
     defer file.close();
 
     const file_size = try file.getEndPos();
@@ -33,13 +33,13 @@ pub fn readFileBytes(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     return buffer;
 }
 
-pub fn readFileLinesWith(
+pub fn readLines(
     comptime Ctx: type,
     path: []const u8,
     ctx: *Ctx,
     comptime handleLineFn: fn (*Ctx, []const u8, []const u8) anyerror!bool,
 ) !void {
-    var file = openFile(path) catch |err| switch (err) {
+    var file = open(path) catch |err| switch (err) {
         error.FileNotFound => return,
         else => return err,
     };
@@ -66,7 +66,7 @@ pub fn readFileLinesWith(
     }
 }
 
-fn createFile(path: []const u8, flags: std.fs.File.CreateFlags) !std.fs.File {
+fn create(path: []const u8, flags: std.fs.File.CreateFlags) !std.fs.File {
     var dir = try getDir(path);
     defer dir.close();
 
@@ -74,9 +74,9 @@ fn createFile(path: []const u8, flags: std.fs.File.CreateFlags) !std.fs.File {
     return try dir.createFile(basename, flags);
 }
 
-pub fn writeFileBytes(path: []const u8, bytes: []const u8, flags: ?std.fs.File.CreateFlags) !void {
+pub fn writeBytes(path: []const u8, bytes: []const u8, flags: ?std.fs.File.CreateFlags) !void {
     const f = flags orelse std.fs.File.CreateFlags{};
-    var file = try createFile(path, f);
+    var file = try create(path, f);
     defer file.close();
 
     var writer_buf: [4096]u8 = undefined;
@@ -85,8 +85,8 @@ pub fn writeFileBytes(path: []const u8, bytes: []const u8, flags: ?std.fs.File.C
     try writer.interface.flush();
 }
 
-pub fn writeFileWith(path: []const u8, flags: ?std.fs.File.CreateFlags, ctx: anytype, comptime writeFn: anytype) !void {
-    var file = try createFile(path, flags orelse std.fs.File.CreateFlags{});
+pub fn writeWith(path: []const u8, flags: ?std.fs.File.CreateFlags, ctx: anytype, comptime writeFn: anytype) !void {
+    var file = try create(path, flags orelse std.fs.File.CreateFlags{});
     defer file.close();
 
     var writer_buf: [4096]u8 = undefined;

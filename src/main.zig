@@ -2,53 +2,18 @@ const std = @import("std");
 const input = @import("util/input.zig");
 const sdl = @import("util/sdl.zig").c;
 const renderer_mod = @import("renderer/renderer.zig");
+const Settings = @import("util/settings.zig").Settings;
+const Window = @import("util/window.zig").Window;
 
 pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
-
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
-    if (!sdl.SDL_Init(sdl.SDL_INIT_VIDEO)) {
-        std.debug.print("SDL_Init failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
-        return error.SDLInitFailed;
-    }
-    defer sdl.SDL_Quit();
-
-    const window = sdl.SDL_CreateWindow("SDL3.4 + Zig", 800, 500, 0) orelse {
-        std.debug.print("SDL_CreateWindow failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
-        return error.SDLCreateWindowFailed;
-    };
-    defer sdl.SDL_DestroyWindow(window);
-
-    var win_w: c_int = 0;
-    var win_h: c_int = 0;
-    if (!sdl.SDL_GetWindowSize(window, &win_w, &win_h)) {
-        std.debug.print("SDL_GetWindowSize failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
-        return error.SDLWindowSizeQueryFailed;
-    }
-
+    // Init video & window, Settings, Inputs
+    const window = try Window.init();
+    defer window.deinit();
+    const settings = try Settings.init();
     var input_map = try input.InputMap.init();
 
-    var pixel_w: c_int = 0;
-    var pixel_h: c_int = 0;
-    if (!sdl.SDL_GetWindowSizeInPixels(window, &pixel_w, &pixel_h)) {
-        std.debug.print("SDL_GetWindowSizeInPixels failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
-        return error.SDLWindowSizeQueryFailed;
-    }
-
-    std.debug.print("Window size: {d}x{d} | Pixel size: {d}x{d}\n", .{ win_w, win_h, pixel_w, pixel_h });
-
-    var requested_backend: renderer_mod.Backend = .cpu;
-    for (args[1..]) |arg| {
-        if (std.mem.eql(u8, arg, "--gpu")) requested_backend = .gpu;
-        if (std.mem.eql(u8, arg, "--cpu")) requested_backend = .cpu;
-    }
-
     var renderer: renderer_mod.Renderer = undefined;
-    try renderer.init(window, win_w, win_h, requested_backend);
+    try renderer.init(window.ref, window.w, window.h, settings.backend);
     defer renderer.deinit();
 
     var frame_count: u64 = 0;
