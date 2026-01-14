@@ -1,6 +1,7 @@
 const std = @import("std");
 const sdl = @import("../sdl.zig").c;
 const App = @import("../App.zig").App;
+const RenderLogger = @import("logger.zig").RenderLogger;
 const build_options = @import("build_options");
 
 pub const Timings = struct {
@@ -13,6 +14,7 @@ pub const Renderer = struct {
     app: *App,
     device: *sdl.SDL_GPUDevice,
     window: *sdl.SDL_Window,
+    logger: RenderLogger,
 
     pub fn init(self: *Renderer, app: *App) !void {
         if (!build_options.enable_sdl_gpu) return error.SDLGPUDisabled;
@@ -47,7 +49,7 @@ pub const Renderer = struct {
         // Allow more frames in flight to reduce stalling in WaitAndAcquire.
         _ = sdl.SDL_SetGPUAllowedFramesInFlight(device, 3);
 
-        self.* = .{ .app = app, .device = device, .window = app.window };
+        self.* = .{ .app = app, .device = device, .window = app.window, .logger = RenderLogger.init() };
 
         if (sdl.SDL_GetGPUDeviceDriver(device)) |name_ptr| {
             std.debug.print("GPU device driver: {s}\n", .{std.mem.span(name_ptr)});
@@ -59,7 +61,7 @@ pub const Renderer = struct {
         sdl.SDL_DestroyGPUDevice(self.device);
     }
 
-    pub fn render(self: *Renderer) !Timings {
+    pub fn render(self: *Renderer, log: bool) !void {
         const t0: i128 = std.time.nanoTimestamp();
         const command_buffer = sdl.SDL_AcquireGPUCommandBuffer(self.device) orelse {
             std.debug.print("SDL_AcquireGPUCommandBuffer failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
@@ -80,7 +82,7 @@ pub const Renderer = struct {
         // This can happen when the window is minimized; not an error.
         if (swapchain_texture == null) {
             _ = sdl.SDL_SubmitGPUCommandBuffer(command_buffer);
-            return .{ .lock_fill_unlock_ns = 0, .render_ns = 0, .present_ns = 0 };
+            return;
         }
 
         var color_target: sdl.SDL_GPUColorTargetInfo = std.mem.zeroes(sdl.SDL_GPUColorTargetInfo);
@@ -108,10 +110,12 @@ pub const Renderer = struct {
 
         const t3: i128 = std.time.nanoTimestamp();
 
-        return .{
-            .lock_fill_unlock_ns = @intCast(t1 - t0),
-            .render_ns = @intCast(t2 - t1),
-            .present_ns = @intCast(t3 - t2),
-        };
+        if (log) {
+            self.logger.update_frame_timings(.{
+                .lock_fill_unlock_ns = @intCast(t1 - t0),
+                .render_ns = @intCast(t2 - t1),
+                .present_ns = @intCast(t3 - t2),
+            });
+        }
     }
 };
