@@ -1,21 +1,11 @@
 const std = @import("std");
-const input = @import("util/input.zig");
-const sdl = @import("util/sdl.zig").c;
-const renderer_mod = @import("renderer/renderer.zig");
-const Settings = @import("util/settings.zig").Settings;
-const Window = @import("util/window.zig").Window;
+const sdl = @import("app/sdl.zig").c;
+const App = @import("app/App.zig").App;
 
 pub fn main() !void {
     // Init video & window, Settings, Inputs
-    var window = try Window.init();
-    defer window.deinit();
-    const settings = try Settings.init();
-    var input_map = try input.InputMap.init();
-
-    // Set up renderer
-    var renderer: renderer_mod.Renderer = undefined;
-    try renderer.init(&window, settings.backend);
-    defer renderer.deinit();
+    var app = try App.init();
+    defer app.deinit();
 
     // Frame logging
     var frame_count: u64 = 0;
@@ -30,11 +20,11 @@ pub fn main() !void {
         // Handle input events
         var e: sdl.SDL_Event = undefined;
         while (sdl.SDL_PollEvent(&e)) {
-            input_map.handleEvent(&e, &running);
+            app.inputs.handleEvent(&e, &running);
         }
 
         // Render frame and update timings
-        const timings = try renderer.render();
+        const timings = try app.renderer.render();
         sum_lock_fill_unlock_ns += timings.lock_fill_unlock_ns;
         sum_render_ns += timings.render_ns;
         sum_present_ns += timings.present_ns;
@@ -52,17 +42,11 @@ pub fn main() !void {
             const avg_render_ms: f64 = (@as(f64, @floatFromInt(sum_render_ns)) / denom) / 1_000_000.0;
             const avg_present_ms: f64 = (@as(f64, @floatFromInt(sum_present_ns)) / denom) / 1_000_000.0;
 
-            if (renderer.getBackend() == .gpu) {
-                std.debug.print(
-                    "FPS: {d:.1} | wait+acquire: {d:.3}ms | encode: {d:.3}ms | submit: {d:.3}ms\n",
-                    .{ fps, avg_lock_ms, avg_render_ms, avg_present_ms },
-                );
-            } else {
-                std.debug.print(
-                    "FPS: {d:.1} | lock+fill: {d:.3}ms | render: {d:.3}ms | present: {d:.3}ms\n",
-                    .{ fps, avg_lock_ms, avg_render_ms, avg_present_ms },
-                );
-            }
+            std.debug.print(
+                "FPS: {d:.1} | wait+acquire: {d:.3}ms | encode: {d:.3}ms | submit: {d:.3}ms\n",
+                .{ fps, avg_lock_ms, avg_render_ms, avg_present_ms },
+            );
+
             frame_count = 0;
             last_fps_time = now;
 

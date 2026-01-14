@@ -1,21 +1,22 @@
 const std = @import("std");
-const sdl = @import("../util/sdl.zig").c;
+const sdl = @import("../sdl.zig").c;
+const App = @import("../App.zig").App;
 const build_options = @import("build_options");
-const cpu = @import("core.zig");
-const Window = @import("../util/window.zig").Window;
 
-pub const GpuRenderer = struct {
+pub const Timings = struct {
+    lock_fill_unlock_ns: u64,
+    render_ns: u64,
+    present_ns: u64,
+};
+
+pub const Renderer = struct {
+    app: *App,
     device: *sdl.SDL_GPUDevice,
-    window: *Window,
+    window: *sdl.SDL_Window,
 
-    pub const Timings = cpu.CpuRenderer.Timings;
-
-    pub fn init(self: *GpuRenderer, window: *Window) !void {
+    pub fn init(self: *Renderer, app: *App) !void {
         if (!build_options.enable_sdl_gpu) return error.SDLGPUDisabled;
 
-        // Tell SDL we can (eventually) provide shaders for any backend.
-        // Even though this minimal backend just clears the swapchain, this
-        // helps SDL pick the best driver on each platform.
         const shader_formats: sdl.SDL_GPUShaderFormat =
             sdl.SDL_GPU_SHADERFORMAT_SPIRV |
             sdl.SDL_GPU_SHADERFORMAT_MSL |
@@ -29,36 +30,36 @@ pub const GpuRenderer = struct {
         };
         errdefer sdl.SDL_DestroyGPUDevice(device);
 
-        if (!sdl.SDL_ClaimWindowForGPUDevice(device, window.ref)) {
+        if (!sdl.SDL_ClaimWindowForGPUDevice(device, app.window)) {
             std.debug.print("SDL_ClaimWindowForGPUDevice failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
             return error.SDLClaimWindowForGPUDeviceFailed;
         }
-        errdefer sdl.SDL_ReleaseWindowFromGPUDevice(device, window.ref);
+        errdefer sdl.SDL_ReleaseWindowFromGPUDevice(device, app.window);
         // Swapchain defaults to VSYNC; try to uncap if the platform allows it.
         // (If not supported, we keep the default.)
         const composition = sdl.SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
-        if (sdl.SDL_WindowSupportsGPUPresentMode(device, window.ref, sdl.SDL_GPU_PRESENTMODE_IMMEDIATE)) {
-            _ = sdl.SDL_SetGPUSwapchainParameters(device, window.ref, composition, sdl.SDL_GPU_PRESENTMODE_IMMEDIATE);
-        } else if (sdl.SDL_WindowSupportsGPUPresentMode(device, window.ref, sdl.SDL_GPU_PRESENTMODE_MAILBOX)) {
-            _ = sdl.SDL_SetGPUSwapchainParameters(device, window.ref, composition, sdl.SDL_GPU_PRESENTMODE_MAILBOX);
+        if (sdl.SDL_WindowSupportsGPUPresentMode(device, app.window, sdl.SDL_GPU_PRESENTMODE_IMMEDIATE)) {
+            _ = sdl.SDL_SetGPUSwapchainParameters(device, app.window, composition, sdl.SDL_GPU_PRESENTMODE_IMMEDIATE);
+        } else if (sdl.SDL_WindowSupportsGPUPresentMode(device, app.window, sdl.SDL_GPU_PRESENTMODE_MAILBOX)) {
+            _ = sdl.SDL_SetGPUSwapchainParameters(device, app.window, composition, sdl.SDL_GPU_PRESENTMODE_MAILBOX);
         }
 
         // Allow more frames in flight to reduce stalling in WaitAndAcquire.
         _ = sdl.SDL_SetGPUAllowedFramesInFlight(device, 3);
 
-        self.* = .{ .device = device, .window = window };
+        self.* = .{ .app = app, .device = device, .window = app.window };
 
         if (sdl.SDL_GetGPUDeviceDriver(device)) |name_ptr| {
             std.debug.print("GPU device driver: {s}\n", .{std.mem.span(name_ptr)});
         }
     }
 
-    pub fn deinit(self: *GpuRenderer) void {
-        sdl.SDL_ReleaseWindowFromGPUDevice(self.device, self.window.ref);
+    pub fn deinit(self: *Renderer) void {
+        sdl.SDL_ReleaseWindowFromGPUDevice(self.device, self.window);
         sdl.SDL_DestroyGPUDevice(self.device);
     }
 
-    pub fn render(self: *GpuRenderer) !Timings {
+    pub fn render(self: *Renderer) !Timings {
         const t0: i128 = std.time.nanoTimestamp();
         const command_buffer = sdl.SDL_AcquireGPUCommandBuffer(self.device) orelse {
             std.debug.print("SDL_AcquireGPUCommandBuffer failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
@@ -69,7 +70,7 @@ pub const GpuRenderer = struct {
         var swap_w: u32 = 0;
         var swap_h: u32 = 0;
 
-        if (!sdl.SDL_WaitAndAcquireGPUSwapchainTexture(command_buffer, self.window.ref, &swapchain_texture, &swap_w, &swap_h)) {
+        if (!sdl.SDL_WaitAndAcquireGPUSwapchainTexture(command_buffer, self.window, &swapchain_texture, &swap_w, &swap_h)) {
             std.debug.print("SDL_WaitAndAcquireGPUSwapchainTexture failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
             return error.SDLAcquireSwapchainTextureFailed;
         }
@@ -86,7 +87,6 @@ pub const GpuRenderer = struct {
         color_target.texture = swapchain_texture.?;
         color_target.mip_level = 0;
         color_target.layer_or_depth_plane = 0;
-        // Clear-only backend.
         color_target.clear_color = sdl.SDL_FColor{ .r = 1.0, .g = 1.0, .b = 1.0, .a = 1.0 };
         color_target.load_op = sdl.SDL_GPU_LOADOP_CLEAR;
         color_target.store_op = sdl.SDL_GPU_STOREOP_STORE;
@@ -109,10 +109,6 @@ pub const GpuRenderer = struct {
         const t3: i128 = std.time.nanoTimestamp();
 
         return .{
-            // For the GPU backend these timings mean:
-            // - lock_fill_unlock_ns: swapchain wait+acquire time
-            // - render_ns: command encoding time
-            // - present_ns: submit time (presentation happens asynchronously)
             .lock_fill_unlock_ns = @intCast(t1 - t0),
             .render_ns = @intCast(t2 - t1),
             .present_ns = @intCast(t3 - t2),
