@@ -80,7 +80,7 @@ pub const Renderer = struct {
         color_target.texture = swapchain_texture.?;
         color_target.mip_level = 0;
         color_target.layer_or_depth_plane = 0;
-        color_target.clear_color = sdl.SDL_FColor{ .r = 1.0, .g = 1.0, .b = 1.0, .a = 1.0 };
+        color_target.clear_color = sdl.SDL_FColor{ .r = 0.0, .g = 0.0, .b = 0.0, .a = 1.0 };
         color_target.load_op = sdl.SDL_GPU_LOADOP_CLEAR;
         color_target.store_op = sdl.SDL_GPU_STOREOP_STORE;
         color_target.resolve_texture = null;
