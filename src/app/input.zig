@@ -16,7 +16,14 @@ fn defaultKeyFor(action: Action) sdl.SDL_Keycode {
 }
 
 pub const InputMap = struct {
+    allocator: std.mem.Allocator = std.heap.page_allocator,
     bindings: std.EnumArray(Action, sdl.SDL_Keycode),
+    reverse: std.AutoHashMapUnmanaged(sdl.SDL_Keycode, Action) = .{},
+
+    pub fn deinit(self: *InputMap) void {
+        self.reverse.deinit(self.allocator);
+        self.* = undefined;
+    }
 
     fn handleReadConfigLine(ctx: *InputMap, name: []const u8, value_str: []const u8) !bool {
         const action = std.meta.stringToEnum(Action, name) orelse return false;
@@ -43,8 +50,17 @@ pub const InputMap = struct {
         }
     }
 
+    fn rebuildReverse(self: *InputMap) !void {
+        self.reverse.clearRetainingCapacity();
+        inline for (std.meta.fields(Action)) |f| {
+            const action: Action = @enumFromInt(f.value);
+            try self.reverse.put(self.allocator, self.getInput(action), action);
+        }
+    }
+
     pub fn init() !InputMap {
         var map = InputMap{
+            .allocator = std.heap.page_allocator,
             .bindings = std.EnumArray(Action, sdl.SDL_Keycode).initUndefined(),
         };
 
@@ -53,6 +69,10 @@ pub const InputMap = struct {
 
         // Map bindings from file if it exists
         try io.readLines(InputMap, input_map_filename, &map, handleReadConfigLine);
+
+        // Pre-size reverse map so remaps don't need to allocate.
+        try map.reverse.ensureTotalCapacity(map.allocator, std.meta.fields(Action).len);
+        try map.rebuildReverse();
 
         return map;
     }
@@ -80,7 +100,16 @@ pub const InputMap = struct {
 
     /// Set key for action (do not persist)
     pub fn tempRemap(self: *InputMap, action: Action, new_key: sdl.SDL_Keycode) void {
+        const old_key = self.bindings.get(action);
         self.bindings.set(action, new_key);
+
+        // Update reverse lookup. We avoid allocations by pre-sizing in init().
+        if (self.reverse.get(old_key)) |mapped| {
+            if (mapped == action) {
+                _ = self.reverse.remove(old_key);
+            }
+        }
+        self.reverse.put(self.allocator, new_key, action) catch {};
     }
 
     /// Remap action to new_key (persists settings)
@@ -97,15 +126,7 @@ pub const InputMap = struct {
         }
         if (e.type != sdl.SDL_EVENT_KEY_DOWN) return;
 
-        var matched_action: ?Action = null;
-        inline for (std.meta.fields(Action)) |f| {
-            const a: Action = @enumFromInt(f.value);
-            if (self.getInput(a) == e.key.key) {
-                matched_action = a;
-                break;
-            }
-        }
-        const action = matched_action orelse return;
+        const action = self.reverse.get(e.key.key) orelse return;
 
         switch (action) {
             .quit => running.* = false,

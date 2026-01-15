@@ -4,12 +4,6 @@ const App = @import("../App.zig").App;
 const RenderLogger = @import("logger.zig").RenderLogger;
 const build_options = @import("build_options");
 
-pub const Timings = struct {
-    lock_fill_unlock_ns: u64,
-    render_ns: u64,
-    present_ns: u64,
-};
-
 pub const Renderer = struct {
     app: *App,
     device: *sdl.SDL_GPUDevice,
@@ -21,10 +15,7 @@ pub const Renderer = struct {
 
         const shader_formats: sdl.SDL_GPUShaderFormat =
             sdl.SDL_GPU_SHADERFORMAT_SPIRV |
-            sdl.SDL_GPU_SHADERFORMAT_MSL |
-            sdl.SDL_GPU_SHADERFORMAT_METALLIB |
-            sdl.SDL_GPU_SHADERFORMAT_DXBC |
-            sdl.SDL_GPU_SHADERFORMAT_DXIL;
+            sdl.SDL_GPU_SHADERFORMAT_METALLIB;
 
         const device = sdl.SDL_CreateGPUDevice(shader_formats, false, null) orelse {
             std.debug.print("SDL_CreateGPUDevice failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
@@ -37,8 +28,8 @@ pub const Renderer = struct {
             return error.SDLClaimWindowForGPUDeviceFailed;
         }
         errdefer sdl.SDL_ReleaseWindowFromGPUDevice(device, app.window);
+
         // Swapchain defaults to VSYNC; try to uncap if the platform allows it.
-        // (If not supported, we keep the default.)
         const composition = sdl.SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
         if (sdl.SDL_WindowSupportsGPUPresentMode(device, app.window, sdl.SDL_GPU_PRESENTMODE_IMMEDIATE)) {
             _ = sdl.SDL_SetGPUSwapchainParameters(device, app.window, composition, sdl.SDL_GPU_PRESENTMODE_IMMEDIATE);

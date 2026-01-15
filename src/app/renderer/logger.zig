@@ -1,5 +1,10 @@
 const std = @import("std");
-const Timings = @import("core.zig").Timings;
+
+const Timings = struct {
+    lock_fill_unlock_ns: u128,
+    render_ns: u128,
+    present_ns: u128,
+};
 
 pub const RenderLogger = struct {
     frame_count: u64 = 0,

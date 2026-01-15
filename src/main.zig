@@ -13,7 +13,7 @@ pub fn main() !void {
         // Handle input events
         var e: sdl.SDL_Event = undefined;
         while (sdl.SDL_PollEvent(&e)) {
-            app.inputs.handleEvent(&e, &running);
+            app.handleEvent(&e, &running);
         }
 
         // Render frame and update timings
