@@ -241,31 +241,46 @@ pub fn build(b: *std.Build) void {
     std.fs.cwd().makePath(examples_out_dir) catch {};
 
     // Compile WGSL -> SPIR-V + MSL via naga.
-    const example_triangle_shaders = b.step("example-triangle-shaders", "Compile example triangle WGSL with naga (MSL + SPIR-V)");
+    // This loops over every `.wgsl` file in the example shaders folder.
+    const example_triangle_shaders = b.step("example-triangle-shaders", "Compile example WGSL shaders with naga (MSL + SPIR-V)");
 
-    const example_wgsl_src = "_examples/sdl_gpu_triangle_wgsl/shaders/triangle.wgsl";
-    const example_triangle_spv = b.fmt("{s}/triangle.spv", .{examples_out_dir});
-    const example_triangle_msl = b.fmt("{s}/triangle.metal", .{examples_out_dir});
+    const example_shaders_dir = "_examples/sdl_gpu_triangle_wgsl/shaders";
+    var shader_dir = std.fs.cwd().openDir(example_shaders_dir, .{ .iterate = true }) catch |err| {
+        std.debug.print("Failed to open {s}: {any}\n", .{ example_shaders_dir, err });
+        return;
+    };
+    defer shader_dir.close();
 
-    // naga-cli v28+ uses: `naga <input> <output...>` and infers output kinds from extensions.
-    const naga_triangle = b.addSystemCommand(&.{
-        naga_bin,
-        "--input-kind",
-        "wgsl",
-        example_wgsl_src,
-        example_triangle_spv,
-        example_triangle_msl,
-    });
-    example_triangle_shaders.dependOn(&naga_triangle.step);
+    var it = shader_dir.iterate();
+    while (it.next() catch null) |entry| {
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.name, ".wgsl")) continue;
 
-    // Install the compiled shaders next to the example executable.
-    // The runtime loads from `@executable_path/_examples/sdl_gpu_triangle_wgsl/...`
-    const install_example_triangle_spv = b.addInstallBinFile(b.path(example_triangle_spv), "_examples/sdl_gpu_triangle_wgsl/triangle.spv");
-    const install_example_triangle_msl = b.addInstallBinFile(b.path(example_triangle_msl), "_examples/sdl_gpu_triangle_wgsl/triangle.metal");
-    install_example_triangle_spv.step.dependOn(example_triangle_shaders);
-    install_example_triangle_msl.step.dependOn(example_triangle_shaders);
-    b.getInstallStep().dependOn(&install_example_triangle_spv.step);
-    b.getInstallStep().dependOn(&install_example_triangle_msl.step);
+        const stem = std.fs.path.stem(entry.name);
+        const input_path = b.fmt("{s}/{s}", .{ example_shaders_dir, entry.name });
+        const out_spv = b.fmt("{s}/{s}.spv", .{ examples_out_dir, stem });
+        const out_metal = b.fmt("{s}/{s}.metal", .{ examples_out_dir, stem });
+
+        // naga-cli v28+ uses: `naga <input> <output...>` and infers output kinds from extensions.
+        const naga_cmd = b.addSystemCommand(&.{
+            naga_bin,
+            "--input-kind",
+            "wgsl",
+            input_path,
+            out_spv,
+            out_metal,
+        });
+        example_triangle_shaders.dependOn(&naga_cmd.step);
+
+        // Install the compiled shaders next to the example executable.
+        // The runtime loads from `@executable_path/_examples/sdl_gpu_triangle_wgsl/...`
+        const install_spv = b.addInstallBinFile(b.path(out_spv), b.fmt("_examples/sdl_gpu_triangle_wgsl/{s}.spv", .{stem}));
+        const install_metal = b.addInstallBinFile(b.path(out_metal), b.fmt("_examples/sdl_gpu_triangle_wgsl/{s}.metal", .{stem}));
+        install_spv.step.dependOn(example_triangle_shaders);
+        install_metal.step.dependOn(example_triangle_shaders);
+        b.getInstallStep().dependOn(&install_spv.step);
+        b.getInstallStep().dependOn(&install_metal.step);
+    }
 
     // Example executable: minimal SDL_gpu triangle.
     const example_triangle = b.addExecutable(.{
