@@ -1,11 +1,12 @@
 const std = @import("std");
-const sdlError = @import("logging.zig").sdlError;
+const sdlError = @import("./logger.zig").sdlError;
 const c = @import("SDL.zig").c;
 
 fn shaderPathAlloc(allocator: std.mem.Allocator, leaf: []const u8) ![]u8 {
     var exe_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
     const exe_dir = try std.fs.selfExeDirPath(&exe_dir_buf);
-    return try std.fs.path.join(allocator, &.{ exe_dir, "_examples", "sdl_gpu_triangle_wgsl", leaf });
+    // `leaf` may include subdirectories (e.g. "shaders/triangle.spv").
+    return try std.fs.path.join(allocator, &.{ exe_dir, leaf });
 }
 
 fn readFileAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
@@ -24,7 +25,9 @@ pub const ShaderProgram = struct {
             else => unreachable,
         };
 
-        const leaf = try std.fmt.allocPrint(allocator, "{s}{s}", .{ base_name, ext });
+        // Default to loading shaders from the install directory layout.
+        // For now, use the example install location.
+        const leaf = try std.fmt.allocPrint(allocator, "{s}{s}{s}", .{ "_examples/sdl_gpu_triangle_wgsl/", base_name, ext });
         defer allocator.free(leaf);
 
         const shader_path = try shaderPathAlloc(allocator, leaf);

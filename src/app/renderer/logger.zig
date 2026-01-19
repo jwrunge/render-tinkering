@@ -1,10 +1,15 @@
 const std = @import("std");
+const c = @import("SDL.zig").c;
 
 const Timings = struct {
     lock_fill_unlock_ns: u128,
     render_ns: u128,
     present_ns: u128,
 };
+
+pub fn sdlError() []const u8 {
+    return std.mem.span(c.SDL_GetError());
+}
 
 pub const RenderLogger = struct {
     frame_count: u64 = 0,

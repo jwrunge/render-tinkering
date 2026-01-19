@@ -1,5 +1,5 @@
 const std = @import("std");
-const sdlError = @import("Logging.zig").sdlError;
+const sdlError = @import("logging.zig").sdlError;
 const ShaderProgram = @import("ShaderProgram.zig").ShaderProgram;
 const VertexLayout = @import("VertexLayout.zig").VertexLayout;
 const c = @import("SDL.zig").c;
