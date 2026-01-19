@@ -1,27 +1,12 @@
 const std = @import("std");
-
-pub const c = @cImport({
-    @cInclude("SDL3/SDL.h");
-    @cInclude("SDL3/SDL_gpu.h");
-});
+const sdlError = @import("Logging.zig").sdlError;
+const ShaderProgram = @import("ShaderProgram.zig").ShaderProgram;
+const VertexLayout = @import("VertexLayout.zig").VertexLayout;
+const c = @import("SDL.zig").c;
 
 const Vertex = extern struct {
     pos: [2]f32,
 };
-
-fn sdlError() []const u8 {
-    return std.mem.span(c.SDL_GetError());
-}
-
-fn readFileAlloc(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    return try std.fs.cwd().readFileAlloc(allocator, path, 16 * 1024 * 1024);
-}
-
-fn shaderPathAlloc(allocator: std.mem.Allocator, leaf: []const u8) ![]u8 {
-    var exe_dir_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const exe_dir = try std.fs.selfExeDirPath(&exe_dir_buf);
-    return try std.fs.path.join(allocator, &.{ exe_dir, "_examples", "sdl_gpu_triangle_wgsl", leaf });
-}
 
 fn pickShaderFormat(formats: c.SDL_GPUShaderFormat) c.SDL_GPUShaderFormat {
     // Prefer MSL on macOS (Metal driver). Fall back to SPIR-V when available.
@@ -29,75 +14,6 @@ fn pickShaderFormat(formats: c.SDL_GPUShaderFormat) c.SDL_GPUShaderFormat {
     if ((formats & c.SDL_GPU_SHADERFORMAT_SPIRV) != 0) return c.SDL_GPU_SHADERFORMAT_SPIRV;
     return c.SDL_GPU_SHADERFORMAT_INVALID;
 }
-
-const Shader = struct {
-    device: *c.SDL_GPUDevice,
-    vs: *c.SDL_GPUShader,
-    fs: *c.SDL_GPUShader,
-    pub fn init(allocator: std.mem.Allocator, device: *c.SDL_GPUDevice, shader_format: c.SDL_GPUShaderFormat, path: []const u8) !Shader {
-        const ext: []const u8 = switch (shader_format) {
-            c.SDL_GPU_SHADERFORMAT_MSL => ".metal",
-            c.SDL_GPU_SHADERFORMAT_SPIRV => ".spv",
-            else => unreachable,
-        };
-
-        const leaf = try std.fmt.allocPrint(allocator, "{s}{s}", .{ path, ext });
-        defer allocator.free(leaf);
-
-        const shader_path = try shaderPathAlloc(allocator, leaf);
-        defer allocator.free(shader_path);
-
-        const shader_code = try readFileAlloc(allocator, shader_path);
-        defer allocator.free(shader_code);
-
-        const vs_info: c.SDL_GPUShaderCreateInfo = .{
-            .code_size = shader_code.len,
-            .code = @ptrCast(shader_code.ptr),
-            .entrypoint = "vs_main",
-            .format = shader_format,
-            .stage = c.SDL_GPU_SHADERSTAGE_VERTEX,
-            .num_samplers = 0,
-            .num_storage_textures = 0,
-            .num_storage_buffers = 0,
-            .num_uniform_buffers = 0,
-            .props = 0,
-        };
-
-        const fs_info: c.SDL_GPUShaderCreateInfo = .{
-            .code_size = shader_code.len,
-            .code = @ptrCast(shader_code.ptr),
-            .entrypoint = "fs_main",
-            .format = shader_format,
-            .stage = c.SDL_GPU_SHADERSTAGE_FRAGMENT,
-            .num_samplers = 0,
-            .num_storage_textures = 0,
-            .num_storage_buffers = 0,
-            .num_uniform_buffers = 0,
-            .props = 0,
-        };
-
-        const vs = c.SDL_CreateGPUShader(device, &vs_info) orelse {
-            std.debug.print("SDL_CreateGPUShader(vs) failed: {s}\n", .{sdlError()});
-            return error.SDLCreateGPUShaderFailed;
-        };
-
-        const fs = c.SDL_CreateGPUShader(device, &fs_info) orelse {
-            std.debug.print("SDL_CreateGPUShader(fs) failed: {s}\n", .{sdlError()});
-            return error.SDLCreateGPUShaderFailed;
-        };
-
-        return Shader{
-            .device = device,
-            .vs = vs,
-            .fs = fs,
-        };
-    }
-
-    pub fn deinit(self: Shader) void {
-        c.SDL_ReleaseGPUShader(self.device, self.vs);
-        c.SDL_ReleaseGPUShader(self.device, self.fs);
-    }
-};
 
 pub fn main() !void {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
@@ -144,23 +60,23 @@ pub fn main() !void {
         return error.NoSupportedShaderFormat;
     }
 
-    const triangle_shader = try Shader.init(allocator, device, shader_format, "triangle");
+    var vb_desc = [_]c.SDL_GPUVertexBufferDescription{
+        .{ .slot = 0, .pitch = @sizeOf(Vertex), .input_rate = c.SDL_GPU_VERTEXINPUTRATE_VERTEX, .instance_step_rate = 0 },
+        // later you can add slot=1 here for instancing, etc
+    };
+
+    var vb_attr = [_]c.SDL_GPUVertexAttribute{
+        .{ .location = 0, .buffer_slot = 0, .format = c.SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = 0 },
+        // later: .{ .location = 1, .buffer_slot = 1, ... } etc
+    };
+
+    const layout = VertexLayout{
+        .vb_desc = vb_desc[0..],
+        .vb_attr = vb_attr[0..],
+    };
+
+    const triangle_shader = try ShaderProgram.init(allocator, device, shader_format, "triangle");
     defer triangle_shader.deinit();
-
-    // Vertex layout: one buffer slot (0), one attribute at location(0) = float2 position.
-    const vb_desc = [_]c.SDL_GPUVertexBufferDescription{.{
-        .slot = 0,
-        .pitch = @sizeOf(Vertex),
-        .input_rate = c.SDL_GPU_VERTEXINPUTRATE_VERTEX,
-        .instance_step_rate = 0,
-    }};
-
-    const vb_attr = [_]c.SDL_GPUVertexAttribute{.{
-        .location = 0,
-        .buffer_slot = 0,
-        .format = c.SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,
-        .offset = 0,
-    }};
 
     const swap_format = c.SDL_GetGPUSwapchainTextureFormat(device, window);
 
@@ -181,13 +97,6 @@ pub fn main() !void {
         .padding1 = 0,
         .padding2 = 0,
         .padding3 = 0,
-    };
-
-    const vertex_input_state: c.SDL_GPUVertexInputState = .{
-        .vertex_buffer_descriptions = &vb_desc,
-        .num_vertex_buffers = @intCast(vb_desc.len),
-        .vertex_attributes = &vb_attr,
-        .num_vertex_attributes = @intCast(vb_attr.len),
     };
 
     var raster: c.SDL_GPURasterizerState = std.mem.zeroes(c.SDL_GPURasterizerState);
@@ -211,7 +120,7 @@ pub fn main() !void {
     const pipeline_info: c.SDL_GPUGraphicsPipelineCreateInfo = .{
         .vertex_shader = triangle_shader.vs,
         .fragment_shader = triangle_shader.fs,
-        .vertex_input_state = vertex_input_state,
+        .vertex_input_state = layout.vertexInputState(),
         .primitive_type = c.SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
         .rasterizer_state = raster,
         .multisample_state = msaa,
