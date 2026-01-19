@@ -64,6 +64,70 @@ fn addLibraryPathIfExists(exe: *std.Build.Step.Compile, path: []const u8) void {
     }
 }
 
+fn sanitizePathForBuildDir(b: *std.Build, path: []const u8) []const u8 {
+    // Turn a relative path like "assets/shaders" into something safe for a single folder name.
+    // This is only used for build output folders.
+    var buf = std.ArrayList(u8).init(b.allocator);
+    for (path) |ch| {
+        switch (ch) {
+            '/', '\\', ':', ' ' => buf.append('_') catch unreachable,
+            else => buf.append(ch) catch unreachable,
+        }
+    }
+    return buf.toOwnedSlice() catch unreachable;
+}
+
+fn addWgslShaderDir(
+    b: *std.Build,
+    compile_step: *std.Build.Step,
+    naga_bin: []const u8,
+    shader_dir_path: []const u8,
+) void {
+    // Compile all `.wgsl` files directly in `shader_dir_path` (non-recursive) into
+    // SPIR-V and MSL, and install them under the same relative directory next to the executable.
+
+    const safe_dir = sanitizePathForBuildDir(b, shader_dir_path);
+    const out_dir = b.fmt("build/shaders/{s}", .{safe_dir});
+    std.fs.cwd().makePath(out_dir) catch {};
+
+    var shader_dir = std.fs.cwd().openDir(shader_dir_path, .{ .iterate = true }) catch |err| {
+        std.debug.print("Failed to open shader dir {s}: {any}\n", .{ shader_dir_path, err });
+        return;
+    };
+    defer shader_dir.close();
+
+    var it = shader_dir.iterate();
+    while (it.next() catch null) |entry| {
+        if (entry.kind != .file) continue;
+        if (!std.mem.endsWith(u8, entry.name, ".wgsl")) continue;
+
+        const stem = std.fs.path.stem(entry.name);
+        const input_path = b.fmt("{s}/{s}", .{ shader_dir_path, entry.name });
+        const out_spv = b.fmt("{s}/{s}.spv", .{ out_dir, stem });
+        const out_metal = b.fmt("{s}/{s}.metal", .{ out_dir, stem });
+
+        // naga-cli v28+ uses: `naga <input> <output...>` and infers output kinds from extensions.
+        const naga_cmd = b.addSystemCommand(&.{
+            naga_bin,
+            "--input-kind",
+            "wgsl",
+            input_path,
+            out_spv,
+            out_metal,
+        });
+        compile_step.dependOn(&naga_cmd.step);
+
+        // Install compiled shaders next to the executable.
+        // Preserve the given relative directory (e.g. `shaders/foo.spv`).
+        const install_spv = b.addInstallBinFile(b.path(out_spv), b.fmt("{s}/{s}.spv", .{ shader_dir_path, stem }));
+        const install_metal = b.addInstallBinFile(b.path(out_metal), b.fmt("{s}/{s}.metal", .{ shader_dir_path, stem }));
+        install_spv.step.dependOn(&naga_cmd.step);
+        install_metal.step.dependOn(&naga_cmd.step);
+        b.getInstallStep().dependOn(&install_spv.step);
+        b.getInstallStep().dependOn(&install_metal.step);
+    }
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -72,6 +136,12 @@ pub fn build(b: *std.Build) void {
     const use_simd_fill = b.option(bool, "use_simd_fill", "Use SIMD/vectorized pixel fill (default: true)") orelse true;
     const enable_sdl_gpu = b.option(bool, "enable_sdl_gpu", "Enable SDL3 GPU API backend (SDL_gpu.h) (default: true)") orelse true;
     const naga_bin = b.option([]const u8, "naga_bin", "Path to the naga CLI (defaults to `naga` in PATH)") orelse "naga";
+    const shader_dirs = [_][]const u8{
+        // Add project shader folders here. Each folder is scanned for `*.wgsl` (non-recursive).
+        // Compiled outputs are installed under the same relative folder next to the executable.
+        "shaders",
+        "_examples/sdl_gpu_triangle_wgsl/shaders",
+    };
 
     const exe = b.addExecutable(.{
         .name = "render",
@@ -232,6 +302,16 @@ pub fn build(b: *std.Build) void {
     const run_step = b.step("run", "Run the app");
     run_step.dependOn(&run_cmd.step);
 
+    // --- shaders (generic) ---
+    // Compile and install all WGSL shaders in the hard-coded `shader_dirs`.
+    const shaders_step = b.step("shaders", "Compile WGSL shaders from shader_dirs (MSL + SPIR-V) and install them");
+    inline for (shader_dirs) |dir| {
+        addWgslShaderDir(b, shaders_step, naga_bin, dir);
+    }
+
+    // Ensure `zig build run` gets shaders installed first.
+    run_cmd.step.dependOn(shaders_step);
+
     // --- _examples ---
     // These are intentionally kept out of the main `src/` app. They build as extra
     // executables and share the same SDL3 configuration.
@@ -244,42 +324,44 @@ pub fn build(b: *std.Build) void {
     // This loops over every `.wgsl` file in the example shaders folder.
     const example_triangle_shaders = b.step("example-triangle-shaders", "Compile example WGSL shaders with naga (MSL + SPIR-V)");
 
-    const example_shaders_dir = "_examples/sdl_gpu_triangle_wgsl/shaders";
-    var shader_dir = std.fs.cwd().openDir(example_shaders_dir, .{ .iterate = true }) catch |err| {
-        std.debug.print("Failed to open {s}: {any}\n", .{ example_shaders_dir, err });
-        return;
-    };
-    defer shader_dir.close();
+    const example_shader_dirs = [_][]const u8{"_examples/sdl_gpu_triangle_wgsl/shaders"};
+    for (example_shader_dirs) |dir| {
+        var shader_dir = std.fs.cwd().openDir(dir, .{ .iterate = true }) catch |err| {
+            std.debug.print("Failed to open {s}: {any}\n", .{ dir, err });
+            return;
+        };
+        defer shader_dir.close();
 
-    var it = shader_dir.iterate();
-    while (it.next() catch null) |entry| {
-        if (entry.kind != .file) continue;
-        if (!std.mem.endsWith(u8, entry.name, ".wgsl")) continue;
+        var it = shader_dir.iterate();
+        while (it.next() catch null) |entry| {
+            if (entry.kind != .file) continue;
+            if (!std.mem.endsWith(u8, entry.name, ".wgsl")) continue;
 
-        const stem = std.fs.path.stem(entry.name);
-        const input_path = b.fmt("{s}/{s}", .{ example_shaders_dir, entry.name });
-        const out_spv = b.fmt("{s}/{s}.spv", .{ examples_out_dir, stem });
-        const out_metal = b.fmt("{s}/{s}.metal", .{ examples_out_dir, stem });
+            const stem = std.fs.path.stem(entry.name);
+            const input_path = b.fmt("{s}/{s}", .{ dir, entry.name });
+            const out_spv = b.fmt("{s}/{s}.spv", .{ examples_out_dir, stem });
+            const out_metal = b.fmt("{s}/{s}.metal", .{ examples_out_dir, stem });
 
-        // naga-cli v28+ uses: `naga <input> <output...>` and infers output kinds from extensions.
-        const naga_cmd = b.addSystemCommand(&.{
-            naga_bin,
-            "--input-kind",
-            "wgsl",
-            input_path,
-            out_spv,
-            out_metal,
-        });
-        example_triangle_shaders.dependOn(&naga_cmd.step);
+            // naga-cli v28+ uses: `naga <input> <output...>` and infers output kinds from extensions.
+            const naga_cmd = b.addSystemCommand(&.{
+                naga_bin,
+                "--input-kind",
+                "wgsl",
+                input_path,
+                out_spv,
+                out_metal,
+            });
+            example_triangle_shaders.dependOn(&naga_cmd.step);
 
-        // Install the compiled shaders next to the example executable.
-        // The runtime loads from `@executable_path/_examples/sdl_gpu_triangle_wgsl/...`
-        const install_spv = b.addInstallBinFile(b.path(out_spv), b.fmt("_examples/sdl_gpu_triangle_wgsl/{s}.spv", .{stem}));
-        const install_metal = b.addInstallBinFile(b.path(out_metal), b.fmt("_examples/sdl_gpu_triangle_wgsl/{s}.metal", .{stem}));
-        install_spv.step.dependOn(example_triangle_shaders);
-        install_metal.step.dependOn(example_triangle_shaders);
-        b.getInstallStep().dependOn(&install_spv.step);
-        b.getInstallStep().dependOn(&install_metal.step);
+            // Install the compiled shaders next to the example executable.
+            // The runtime loads from `@executable_path/_examples/sdl_gpu_triangle_wgsl/...`
+            const install_spv = b.addInstallBinFile(b.path(out_spv), b.fmt("_examples/sdl_gpu_triangle_wgsl/{s}.spv", .{stem}));
+            const install_metal = b.addInstallBinFile(b.path(out_metal), b.fmt("_examples/sdl_gpu_triangle_wgsl/{s}.metal", .{stem}));
+            install_spv.step.dependOn(example_triangle_shaders);
+            install_metal.step.dependOn(example_triangle_shaders);
+            b.getInstallStep().dependOn(&install_spv.step);
+            b.getInstallStep().dependOn(&install_metal.step);
+        }
     }
 
     // Example executable: minimal SDL_gpu triangle.
