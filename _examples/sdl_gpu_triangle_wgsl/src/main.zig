@@ -30,6 +30,75 @@ fn pickShaderFormat(formats: c.SDL_GPUShaderFormat) c.SDL_GPUShaderFormat {
     return c.SDL_GPU_SHADERFORMAT_INVALID;
 }
 
+const Shader = struct {
+    device: *c.SDL_GPUDevice,
+    vs: *c.SDL_GPUShader,
+    fs: *c.SDL_GPUShader,
+    pub fn init(allocator: std.mem.Allocator, device: *c.SDL_GPUDevice, shader_format: c.SDL_GPUShaderFormat, path: []const u8) !Shader {
+        const ext: []const u8 = switch (shader_format) {
+            c.SDL_GPU_SHADERFORMAT_MSL => ".metal",
+            c.SDL_GPU_SHADERFORMAT_SPIRV => ".spv",
+            else => unreachable,
+        };
+
+        const leaf = try std.fmt.allocPrint(allocator, "{s}{s}", .{ path, ext });
+        defer allocator.free(leaf);
+
+        const shader_path = try shaderPathAlloc(allocator, leaf);
+        defer allocator.free(shader_path);
+
+        const shader_code = try readFileAlloc(allocator, shader_path);
+        defer allocator.free(shader_code);
+
+        const vs_info: c.SDL_GPUShaderCreateInfo = .{
+            .code_size = shader_code.len,
+            .code = @ptrCast(shader_code.ptr),
+            .entrypoint = "vs_main",
+            .format = shader_format,
+            .stage = c.SDL_GPU_SHADERSTAGE_VERTEX,
+            .num_samplers = 0,
+            .num_storage_textures = 0,
+            .num_storage_buffers = 0,
+            .num_uniform_buffers = 0,
+            .props = 0,
+        };
+
+        const fs_info: c.SDL_GPUShaderCreateInfo = .{
+            .code_size = shader_code.len,
+            .code = @ptrCast(shader_code.ptr),
+            .entrypoint = "fs_main",
+            .format = shader_format,
+            .stage = c.SDL_GPU_SHADERSTAGE_FRAGMENT,
+            .num_samplers = 0,
+            .num_storage_textures = 0,
+            .num_storage_buffers = 0,
+            .num_uniform_buffers = 0,
+            .props = 0,
+        };
+
+        const vs = c.SDL_CreateGPUShader(device, &vs_info) orelse {
+            std.debug.print("SDL_CreateGPUShader(vs) failed: {s}\n", .{sdlError()});
+            return error.SDLCreateGPUShaderFailed;
+        };
+
+        const fs = c.SDL_CreateGPUShader(device, &fs_info) orelse {
+            std.debug.print("SDL_CreateGPUShader(fs) failed: {s}\n", .{sdlError()});
+            return error.SDLCreateGPUShaderFailed;
+        };
+
+        return Shader{
+            .device = device,
+            .vs = vs,
+            .fs = fs,
+        };
+    }
+
+    pub fn deinit(self: Shader) void {
+        c.SDL_ReleaseGPUShader(self.device, self.vs);
+        c.SDL_ReleaseGPUShader(self.device, self.fs);
+    }
+};
+
 pub fn main() !void {
     var gpa_state = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa_state.deinit();
@@ -75,53 +144,8 @@ pub fn main() !void {
         return error.NoSupportedShaderFormat;
     }
 
-    const shader_path = try shaderPathAlloc(allocator, switch (shader_format) {
-        c.SDL_GPU_SHADERFORMAT_MSL => "triangle.metal",
-        c.SDL_GPU_SHADERFORMAT_SPIRV => "triangle.spv",
-        else => unreachable,
-    });
-    defer allocator.free(shader_path);
-
-    const shader_code = try readFileAlloc(allocator, shader_path);
-    defer allocator.free(shader_code);
-
-    const vs_info: c.SDL_GPUShaderCreateInfo = .{
-        .code_size = shader_code.len,
-        .code = @ptrCast(shader_code.ptr),
-        .entrypoint = "vs_main",
-        .format = shader_format,
-        .stage = c.SDL_GPU_SHADERSTAGE_VERTEX,
-        .num_samplers = 0,
-        .num_storage_textures = 0,
-        .num_storage_buffers = 0,
-        .num_uniform_buffers = 0,
-        .props = 0,
-    };
-
-    const fs_info: c.SDL_GPUShaderCreateInfo = .{
-        .code_size = shader_code.len,
-        .code = @ptrCast(shader_code.ptr),
-        .entrypoint = "fs_main",
-        .format = shader_format,
-        .stage = c.SDL_GPU_SHADERSTAGE_FRAGMENT,
-        .num_samplers = 0,
-        .num_storage_textures = 0,
-        .num_storage_buffers = 0,
-        .num_uniform_buffers = 0,
-        .props = 0,
-    };
-
-    const vs = c.SDL_CreateGPUShader(device, &vs_info) orelse {
-        std.debug.print("SDL_CreateGPUShader(vs) failed: {s}\n", .{sdlError()});
-        return error.SDLCreateGPUShaderFailed;
-    };
-    defer c.SDL_ReleaseGPUShader(device, vs);
-
-    const fs = c.SDL_CreateGPUShader(device, &fs_info) orelse {
-        std.debug.print("SDL_CreateGPUShader(fs) failed: {s}\n", .{sdlError()});
-        return error.SDLCreateGPUShaderFailed;
-    };
-    defer c.SDL_ReleaseGPUShader(device, fs);
+    const triangle_shader = try Shader.init(allocator, device, shader_format, "triangle");
+    defer triangle_shader.deinit();
 
     // Vertex layout: one buffer slot (0), one attribute at location(0) = float2 position.
     const vb_desc = [_]c.SDL_GPUVertexBufferDescription{.{
@@ -185,8 +209,8 @@ pub fn main() !void {
     ds.enable_stencil_test = false;
 
     const pipeline_info: c.SDL_GPUGraphicsPipelineCreateInfo = .{
-        .vertex_shader = vs,
-        .fragment_shader = fs,
+        .vertex_shader = triangle_shader.vs,
+        .fragment_shader = triangle_shader.fs,
         .vertex_input_state = vertex_input_state,
         .primitive_type = c.SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
         .rasterizer_state = raster,
