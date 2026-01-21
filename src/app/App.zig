@@ -65,7 +65,7 @@ pub const App = struct {
         }
         errdefer sdl.SDL_Quit();
 
-        const window = sdl.SDL_CreateWindow("SDL3.4 + Zig", 800, 500, 0) orelse {
+        const window = sdl.SDL_CreateWindow("SDL3.4 + Zig", 800, 500, sdl.SDL_WINDOW_RESIZABLE) orelse {
             std.debug.print("SDL_CreateWindow failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
             return error.SDLCreateWindowFailed;
         };

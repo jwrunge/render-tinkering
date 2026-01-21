@@ -2,7 +2,6 @@ const std = @import("std");
 const sdl = @import("../sdl.zig").c;
 const App = @import("../App.zig").App;
 const RenderLogger = @import("logger.zig").RenderLogger;
-const build_options = @import("build_options");
 const ShaderProgram = @import("ShaderProgram.zig").ShaderProgram;
 const VertexLayout = @import("VertexLayout.zig").VertexLayout;
 
@@ -27,68 +26,13 @@ pub const Renderer = struct {
     pipeline: *sdl.SDL_GPUGraphicsPipeline,
     vertex_buffer: *sdl.SDL_GPUBuffer,
 
-    pub fn init(self: *Renderer, app: *App) !void {
-        if (!build_options.enable_sdl_gpu) return error.SDLGPUDisabled;
-
-        const requested_formats: sdl.SDL_GPUShaderFormat =
-            sdl.SDL_GPU_SHADERFORMAT_SPIRV |
-            sdl.SDL_GPU_SHADERFORMAT_MSL;
-
-        const device = sdl.SDL_CreateGPUDevice(requested_formats, false, null) orelse {
-            std.debug.print("SDL_CreateGPUDevice failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
-            return error.SDLCreateGPUDeviceFailed;
-        };
-        errdefer sdl.SDL_DestroyGPUDevice(device);
-
-        if (!sdl.SDL_ClaimWindowForGPUDevice(device, app.window)) {
-            std.debug.print("SDL_ClaimWindowForGPUDevice failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
-            return error.SDLClaimWindowForGPUDeviceFailed;
-        }
-        errdefer sdl.SDL_ReleaseWindowFromGPUDevice(device, app.window);
-
-        // Swapchain defaults to VSYNC; try to uncap if the platform allows it.
-        const composition = sdl.SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
-        if (sdl.SDL_WindowSupportsGPUPresentMode(device, app.window, sdl.SDL_GPU_PRESENTMODE_IMMEDIATE)) {
-            _ = sdl.SDL_SetGPUSwapchainParameters(device, app.window, composition, sdl.SDL_GPU_PRESENTMODE_IMMEDIATE);
-        } else if (sdl.SDL_WindowSupportsGPUPresentMode(device, app.window, sdl.SDL_GPU_PRESENTMODE_MAILBOX)) {
-            _ = sdl.SDL_SetGPUSwapchainParameters(device, app.window, composition, sdl.SDL_GPU_PRESENTMODE_MAILBOX);
-        }
-
-        // Allow more frames in flight to reduce stalling in WaitAndAcquire.
-        _ = sdl.SDL_SetGPUAllowedFramesInFlight(device, 3);
-
-        const actual_formats = sdl.SDL_GetGPUShaderFormats(device);
-        const shader_format = pickShaderFormat(actual_formats);
-        if (shader_format == sdl.SDL_GPU_SHADERFORMAT_INVALID) {
-            std.debug.print("No supported shader format. Device supports mask=0x{x}\n", .{actual_formats});
-            return error.NoSupportedShaderFormat;
-        }
-
-        // Create shader program (triangle demo).
-        // Uses the same compiled artifacts as the example.
-        const allocator = std.heap.page_allocator;
-        const shader_program = try ShaderProgram.init(allocator, device, shader_format, "triangle");
-        errdefer shader_program.deinit();
-
-        // Vertex layout: one buffer slot (0), one attribute at location(0) = float2 position.
-        const vb_desc = [_]sdl.SDL_GPUVertexBufferDescription{.{
-            .slot = 0,
-            .pitch = @sizeOf(Vertex),
-            .input_rate = sdl.SDL_GPU_VERTEXINPUTRATE_VERTEX,
-            .instance_step_rate = 0,
-        }};
-
-        const vb_attr = [_]sdl.SDL_GPUVertexAttribute{.{
-            .location = 0,
-            .buffer_slot = 0,
-            .format = sdl.SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,
-            .offset = 0,
-        }};
-
-        const layout = VertexLayout{ .vb_desc = vb_desc[0..], .vb_attr = vb_attr[0..] };
-        const vertex_input_state: sdl.SDL_GPUVertexInputState = layout.vertexInputState();
-
-        const swap_format = sdl.SDL_GetGPUSwapchainTextureFormat(device, app.window);
+    fn createGraphicsPipeline(
+        device: *sdl.SDL_GPUDevice,
+        window: *sdl.SDL_Window,
+        shader_program: *const ShaderProgram,
+        vertex_input_state: sdl.SDL_GPUVertexInputState,
+    ) !*sdl.SDL_GPUGraphicsPipeline {
+        const swap_format = sdl.SDL_GetGPUSwapchainTextureFormat(device, window);
 
         var blend_state: sdl.SDL_GPUColorTargetBlendState = std.mem.zeroes(sdl.SDL_GPUColorTargetBlendState);
         blend_state.enable_blend = false;
@@ -143,9 +87,13 @@ pub const Renderer = struct {
             std.debug.print("SDL_CreateGPUGraphicsPipeline failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
             return error.SDLCreateGPUGraphicsPipelineFailed;
         };
-        errdefer sdl.SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
 
-        // Create a GPU vertex buffer + upload 3 clip-space vertices.
+        return pipeline;
+    }
+
+    fn createTriangleVertexBuffer(device: *sdl.SDL_GPUDevice) !*sdl.SDL_GPUBuffer {
+        // These positions are in clip space (NDC). Without an aspect correction in the shader,
+        // the triangle will appear stretched when the window aspect ratio changes.
         const vertices = [_]Vertex{
             .{ .pos = .{ -0.75, -0.60 } },
             .{ .pos = .{ 0.75, -0.60 } },
@@ -184,6 +132,7 @@ pub const Renderer = struct {
         sdl.SDL_UnmapGPUTransferBuffer(device, transfer_buffer);
 
         // Upload once using a transient command buffer.
+        // (We record a copy pass that moves bytes from an upload buffer into a GPU-only buffer.)
         {
             const cmd = sdl.SDL_AcquireGPUCommandBuffer(device) orelse {
                 std.debug.print("SDL_AcquireGPUCommandBuffer failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
@@ -204,6 +153,91 @@ pub const Renderer = struct {
             }
         }
 
+        return vertex_buffer;
+    }
+
+    pub fn init(self: *Renderer, app: *App) !void {
+        // === 1) Create a GPU device and attach it to the window ===
+        // We ask SDL for a device that can consume either SPIR-V or Metal shader binaries.
+        const requested_formats: sdl.SDL_GPUShaderFormat =
+            sdl.SDL_GPU_SHADERFORMAT_SPIRV |
+            sdl.SDL_GPU_SHADERFORMAT_MSL;
+
+        const device = sdl.SDL_CreateGPUDevice(requested_formats, false, null) orelse {
+            std.debug.print("SDL_CreateGPUDevice failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
+            return error.SDLCreateGPUDeviceFailed;
+        };
+        // `errdefer` means: if we return an error later in init(), run this cleanup.
+        errdefer sdl.SDL_DestroyGPUDevice(device);
+
+        if (!sdl.SDL_ClaimWindowForGPUDevice(device, app.window)) {
+            std.debug.print("SDL_ClaimWindowForGPUDevice failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
+            return error.SDLClaimWindowForGPUDeviceFailed;
+        }
+        errdefer sdl.SDL_ReleaseWindowFromGPUDevice(device, app.window);
+
+        // === 2) Configure swapchain / presentation behavior ===
+        // Swapchain = the series of images we render into and present to the window.
+
+        // Swapchain defaults to VSYNC; try to uncap if the platform allows it.
+        const composition = sdl.SDL_GPU_SWAPCHAINCOMPOSITION_SDR;
+        if (sdl.SDL_WindowSupportsGPUPresentMode(device, app.window, sdl.SDL_GPU_PRESENTMODE_IMMEDIATE)) {
+            _ = sdl.SDL_SetGPUSwapchainParameters(device, app.window, composition, sdl.SDL_GPU_PRESENTMODE_IMMEDIATE);
+        } else if (sdl.SDL_WindowSupportsGPUPresentMode(device, app.window, sdl.SDL_GPU_PRESENTMODE_MAILBOX)) {
+            _ = sdl.SDL_SetGPUSwapchainParameters(device, app.window, composition, sdl.SDL_GPU_PRESENTMODE_MAILBOX);
+        }
+
+        // === 3) Tune how far the CPU can get ahead of the GPU ===
+        // More frames-in-flight can reduce stalls but increases latency and resource pressure.
+        // 2–3 is a common default; this is not “20 frames ahead”, it’s a max queue depth.
+        _ = sdl.SDL_SetGPUAllowedFramesInFlight(device, 3);
+
+        // === 4) Pick a shader binary format compatible with the device ===
+
+        const actual_formats = sdl.SDL_GetGPUShaderFormats(device);
+        const shader_format = pickShaderFormat(actual_formats);
+        if (shader_format == sdl.SDL_GPU_SHADERFORMAT_INVALID) {
+            std.debug.print("No supported shader format. Device supports mask=0x{x}\n", .{actual_formats});
+            return error.NoSupportedShaderFormat;
+        }
+
+        // === 5) Load shaders (vertex + fragment) ===
+        // `ShaderProgram` reads the precompiled shader artifacts produced by the build.
+        const allocator = std.heap.page_allocator;
+        const shader_program = try ShaderProgram.init(allocator, device, shader_format, "triangle");
+        errdefer shader_program.deinit();
+
+        // === 6) Describe how vertex buffer bytes map to shader inputs ===
+        // This must match what the vertex shader expects.
+        // Here: one buffer slot (0), one attribute at @location(0) = vec2f position.
+        const vb_desc = [_]sdl.SDL_GPUVertexBufferDescription{.{
+            .slot = 0,
+            .pitch = @sizeOf(Vertex),
+            .input_rate = sdl.SDL_GPU_VERTEXINPUTRATE_VERTEX,
+            .instance_step_rate = 0,
+        }};
+
+        const vb_attr = [_]sdl.SDL_GPUVertexAttribute{.{
+            .location = 0,
+            .buffer_slot = 0,
+            .format = sdl.SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,
+            .offset = 0,
+        }};
+
+        const layout = VertexLayout{ .vb_desc = vb_desc[0..], .vb_attr = vb_attr[0..] };
+        const vertex_input_state: sdl.SDL_GPUVertexInputState = layout.vertexInputState();
+
+        // === 7) Create a graphics pipeline ===
+        // A pipeline is a “bundle” of shaders + fixed-function state (blend/raster/msaa/depth)
+        // compiled together for a specific render target format.
+        const pipeline = try createGraphicsPipeline(device, app.window, &shader_program, vertex_input_state);
+        errdefer sdl.SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
+
+        // === 8) Create GPU buffers and upload geometry ===
+        const vertex_buffer = try createTriangleVertexBuffer(device);
+        errdefer sdl.SDL_ReleaseGPUBuffer(device, vertex_buffer);
+
+        // === 9) Publish fully-initialized renderer state ===
         self.* = .{
             .app = app,
             .device = device,
@@ -228,12 +262,18 @@ pub const Renderer = struct {
     }
 
     pub fn render(self: *Renderer, log: bool) !void {
+        // Frame timings: mostly used to understand where time is going.
         const t0: i128 = std.time.nanoTimestamp();
+
+        // === 1) Get a command buffer for this frame ===
+        // Command buffers record GPU work; submitting them tells the GPU to execute it.
         const command_buffer = sdl.SDL_AcquireGPUCommandBuffer(self.device) orelse {
             std.debug.print("SDL_AcquireGPUCommandBuffer failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
             return error.SDLAcquireGPUCommandBufferFailed;
         };
 
+        // === 2) Acquire the current swapchain texture (the frame we will render into) ===
+        // SDL also returns the pixel size; we use it to set the viewport correctly on resize.
         var swapchain_texture: ?*sdl.SDL_GPUTexture = null;
         var swap_w: u32 = 0;
         var swap_h: u32 = 0;
@@ -246,11 +286,14 @@ pub const Renderer = struct {
         const t1: i128 = std.time.nanoTimestamp();
 
         // This can happen when the window is minimized; not an error.
+        // There's nothing to render to, but we should still submit the command buffer.
         if (swapchain_texture == null) {
             _ = sdl.SDL_SubmitGPUCommandBuffer(command_buffer);
             return;
         }
 
+        // === 3) Begin a render pass targeting the swapchain texture ===
+        // The render pass defines attachments + clear/load/store operations.
         var color_target: sdl.SDL_GPUColorTargetInfo = std.mem.zeroes(sdl.SDL_GPUColorTargetInfo);
         color_target.texture = swapchain_texture.?;
         color_target.mip_level = 0;
@@ -267,6 +310,7 @@ pub const Renderer = struct {
 
         const pass = sdl.SDL_BeginGPURenderPass(command_buffer, &color_target, 1, null);
 
+        // === 4) Dynamic state + bindings + draw ===
         // Be explicit about viewport. SDL sets a default, but resizing correctness is easier this way.
         const vp: sdl.SDL_GPUViewport = .{
             .x = 0,
@@ -277,18 +321,26 @@ pub const Renderer = struct {
             .max_depth = 1.0,
         };
         sdl.SDL_SetGPUViewport(pass, &vp);
+
+        // Bind pipeline (shaders + fixed-function state).
         sdl.SDL_BindGPUGraphicsPipeline(pass, self.pipeline);
+
+        // Bind vertex buffer(s). This provides the per-vertex data consumed by the vertex shader.
         const binding: sdl.SDL_GPUBufferBinding = .{
             .buffer = self.vertex_buffer,
             .offset = 0,
         };
         sdl.SDL_BindGPUVertexBuffers(pass, 0, &binding, 1);
 
+        // Issue a draw: 3 vertices = one triangle.
         sdl.SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
+
+        // Close the pass to finalize the render commands.
         sdl.SDL_EndGPURenderPass(pass);
 
         const t2: i128 = std.time.nanoTimestamp();
 
+        // === 5) Submit recorded work to the GPU ===
         if (!sdl.SDL_SubmitGPUCommandBuffer(command_buffer)) {
             std.debug.print("SDL_SubmitGPUCommandBuffer failed: {s}\n", .{std.mem.span(sdl.SDL_GetError())});
             return error.SDLSubmitGPUCommandBufferFailed;
