@@ -1,6 +1,6 @@
 # CMake
 /build/
-/.zig-cache/
+.zig-cache/
 /zig-out/
 /CMakeFiles/
 /CMakeCache.txt
