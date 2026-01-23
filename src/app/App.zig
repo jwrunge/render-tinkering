@@ -1,7 +1,7 @@
 const std = @import("std");
-const sdl = @import("sdl.zig").sdl;
+const sdl = @import("../sdl.zig").sdl;
 const InputMap = @import("input.zig").InputMap;
-const Renderer = @import("renderer/core.zig").Renderer;
+const Renderer = @import("../renderer/core.zig").Renderer;
 
 pub const App = struct {
     window: *sdl.SDL_Window = undefined,

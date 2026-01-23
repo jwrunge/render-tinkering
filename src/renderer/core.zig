@@ -1,6 +1,6 @@
 const std = @import("std");
 const sdl = @import("../sdl.zig").sdl;
-const App = @import("../App.zig").App;
+const App = @import("../app/App.zig").App;
 const RenderLogger = @import("logger.zig").RenderLogger;
 const ShaderProgram = @import("ShaderProgram.zig").ShaderProgram;
 const VertexLayout = @import("VertexLayout.zig").VertexLayout;
