@@ -1,5 +1,5 @@
 const std = @import("std");
-const sdl = @import("sdl.zig").c;
+const sdl = @import("sdl.zig").sdl;
 const io = @import("file-io.zig");
 
 pub const app_name: []const u8 = "render";

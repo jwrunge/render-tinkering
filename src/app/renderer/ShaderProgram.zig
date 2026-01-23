@@ -1,6 +1,6 @@
 const std = @import("std");
 const sdlError = @import("./logger.zig").sdlError;
-const c = @import("SDL.zig").c;
+const c = @import("../sdl.zig").sdl;
 
 fn shaderPathAlloc(allocator: std.mem.Allocator, leaf: []const u8) ![]u8 {
     var exe_dir_buf: [std.fs.max_path_bytes]u8 = undefined;

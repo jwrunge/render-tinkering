@@ -1,4 +1,4 @@
-const c = @import("SDL.zig").c;
+const c = @import("../sdl.zig").sdl;
 
 pub const VertexLayout = struct {
     vb_desc: []const c.SDL_GPUVertexBufferDescription,

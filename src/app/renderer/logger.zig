@@ -1,5 +1,5 @@
 const std = @import("std");
-const c = @import("SDL.zig").c;
+const c = @import("../sdl.zig").sdl;
 
 const Timings = struct {
     lock_fill_unlock_ns: u128,

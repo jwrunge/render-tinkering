@@ -1,5 +1,5 @@
 const std = @import("std");
-const sdl = @import("sdl.zig").c;
+const sdl = @import("sdl.zig").sdl;
 const InputMap = @import("input.zig").InputMap;
 const Renderer = @import("renderer/core.zig").Renderer;
 

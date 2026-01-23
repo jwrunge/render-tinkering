@@ -1,5 +1,5 @@
 const std = @import("std");
-const sdl = @import("app/sdl.zig").c;
+const sdl = @import("app/sdl.zig").sdl;
 const App = @import("app/App.zig").App;
 
 pub fn main() !void {
